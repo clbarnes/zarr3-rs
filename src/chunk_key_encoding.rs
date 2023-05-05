@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ChunkCoord;
 
+#[enum_delegate::register]
 pub trait ChunkKeyEncoder {
     fn encode(&self, coord: ChunkCoord) -> String;
 }
@@ -41,11 +42,12 @@ pub struct DefaultChunkKeyEncoding {
 
 impl ChunkKeyEncoder for DefaultChunkKeyEncoding {
     fn encode(&self, coord: ChunkCoord) -> String {
-        let s = String::from("c/");
+        let sep = self.separator.to_string();
+        let mut s = String::from("c");
         coord
             .iter()
             .map(|n| n.to_string())
-            .fold(s, |a, b| a + &b + ",")
+            .fold(s, |a, b| a + &sep + &b)
     }
 }
 
@@ -65,10 +67,12 @@ pub struct V2ChunkKeyEncoding {
 
 impl ChunkKeyEncoder for V2ChunkKeyEncoding {
     fn encode(&self, coord: ChunkCoord) -> String {
+        let sep = self.separator.to_string();
         coord
             .iter()
             .map(|n| n.to_string())
-            .fold(String::new(), |a, b| a + &b + ",")
+            .reduce(|a, b| a + &sep + &b)
+            .expect("No coord given")
     }
 }
 
@@ -82,6 +86,7 @@ impl Default for V2ChunkKeyEncoding {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "name", content = "configuration", rename_all = "lowercase")]
+#[enum_delegate::implement(ChunkKeyEncoder)]
 pub enum ChunkKeyEncoding {
     Default(DefaultChunkKeyEncoding),
     V2(V2ChunkKeyEncoding),
@@ -99,6 +104,7 @@ impl Default for ChunkKeyEncoding {
 mod tests {
     use super::*;
     use serde_json;
+    use smallvec::smallvec;
 
     #[test]
     fn roundtrip_chunk_key_encoding() {
@@ -118,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn default_chunk_key_encoding() {
+    fn serde_default_chunk_key_encoding() {
         let to_deser = vec![
             (
                 r#"{"name":"default","configuration":{"separator":"/"}}"#,
@@ -140,5 +146,19 @@ mod tests {
                 serde_json::from_str(s).expect(&format!("Could not deser {s}"));
             assert_eq!(c, expected);
         }
+    }
+
+    #[test]
+    fn default_chunk_key_encoding() {
+        let cke = ChunkKeyEncoding::Default(DefaultChunkKeyEncoding::default());
+        let s = cke.encode(smallvec![1, 2, 3]);
+        assert_eq!(&s, "c/1/2/3");
+    }
+
+    #[test]
+    fn v2_chunk_key_encoding() {
+        let cke = ChunkKeyEncoding::V2(V2ChunkKeyEncoding::default());
+        let s = cke.encode(smallvec![1, 2, 3]);
+        assert_eq!(&s, "1.2.3");
     }
 }
