@@ -33,7 +33,7 @@ pub struct ShardingIndexedCodec {
 }
 
 impl Ndim for ShardingIndexedCodec {
-    fn ndim(&self) -> usize  {
+    fn ndim(&self) -> usize {
         self.chunk_shape.len()
     }
 }

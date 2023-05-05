@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write, Result, Cursor};
+use std::io::{Cursor, Read, Result, Write};
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;

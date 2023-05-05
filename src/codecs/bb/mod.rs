@@ -1,16 +1,16 @@
-use std::io::{ErrorKind, Read, Seek, SeekFrom, Result, Cursor};
+use std::io::{Cursor, ErrorKind, Read, Result, Seek, SeekFrom};
 
 use serde::{Deserialize, Serialize};
 
-use crate::MaybeNdim;
 use crate::codecs::Interval;
+use crate::MaybeNdim;
 
 #[cfg(feature = "blosc")]
 mod blosc_codec;
 #[cfg(feature = "gzip")]
 mod gzip_codec;
 
-const BUF_SIZE: usize = 8*1024;
+const BUF_SIZE: usize = 8 * 1024;
 
 fn discard_bytes<R: Read>(rdr: &mut R, n: usize) -> Result<usize> {
     let buf_len = n.min(BUF_SIZE);
@@ -44,7 +44,10 @@ pub trait ByteReader {
             whole.len()
         };
         if stop < start {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "end is before start"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "end is before start",
+            ))
         } else {
             Ok((&whole[start..stop]).iter().cloned().collect())
         }
@@ -62,7 +65,8 @@ impl<R: Read + Seek> ByteReader for R {
     }
 
     fn partial_read(&mut self, interval: Interval) -> Result<Vec<u8>> {
-        let (from, nbytes) = interval.as_seekfrom_nbytes(Some(self.seek(SeekFrom::End(0))? as usize));
+        let (from, nbytes) =
+            interval.as_seekfrom_nbytes(Some(self.seek(SeekFrom::End(0))? as usize));
         self.seek(from)?;
         let mut buf;
         if let Some(n) = nbytes {
@@ -82,7 +86,11 @@ pub trait BBCodec {
 
     fn decode(&self, encoded: Box<dyn ByteReader>) -> Result<Box<dyn ByteReader>>;
 
-    fn partial_decode(&self, encoded: Box<dyn ByteReader>, interval: Interval) -> Result<Box<dyn ByteReader>> {
+    fn partial_decode(
+        &self,
+        encoded: Box<dyn ByteReader>,
+        interval: Interval,
+    ) -> Result<Box<dyn ByteReader>> {
         let mut decoded = self.decode(encoded)?;
         let buf = decoded.partial_read(interval)?;
         Ok(Box::new(Cursor::new(buf)))
@@ -99,7 +107,7 @@ pub enum BBCodecType {
 }
 
 impl MaybeNdim for BBCodecType {
-    fn maybe_ndim(&self) -> Option<usize>  {
+    fn maybe_ndim(&self) -> Option<usize> {
         None
     }
 }
