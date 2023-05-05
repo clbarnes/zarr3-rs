@@ -30,7 +30,7 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y c-blosc
+      - run: sudo apt-get install -y libblosc-dev
       - run: cargo test --all-features
 
   deploy:
@@ -44,7 +44,6 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y c-blosc
       - run: cargo login ${CRATES_IO_TOKEN}
         env:
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
