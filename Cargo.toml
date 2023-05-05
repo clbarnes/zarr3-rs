@@ -1,0 +1,41 @@
+[package]
+name = "zarr-binary-shard"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+# default = ["bzip", "filesystem", "gzip", "lz", "use_ndarray", "xz"]
+default = ["gzip"]
+
+gzip = ["flate2"]
+# gzip = ["flate2/zlib"]
+# bzip = ["bzip2"]
+# filesystem = ["fs2", "walkdir"]
+# lz = ["lz4"]
+# lz_pure = ["lz-fear"]
+# use_ndarray = ["itertools", "ndarray"]
+# xz = ["xz2"]
+
+[dependencies]
+byteorder = "1.4"
+serde_json = "1.0.39"
+thiserror = "1"
+
+half = { version = "1.6", features = ["serde", "std"] }
+serde = { version = "1.0", features = ["derive"] }
+smallvec = { version = "1", features = ["serde"] }
+flate2 = { version = "1.0.22", optional = true }
+blosc = {version = "0.1.3", optional = true }
+ndarray = "0.15.6"
+serde_with = "3.0.0"
+enum_delegate = "0.2.0"
+# fs2 = { version = "0.4", optional = true }
+# itertools = { version = "0.8", optional = true }
+# lz4 = { version = "1.23", optional = true }
+# lz-fear = { version = "0.1.1", optional = true }
+# ndarray = { version = "0.13", optional = true }
+# walkdir = { version = "2", optional = true }
+# xz2 = { version = "0.1", optional = true }
+# bzip2 = { version = "0.4", optional = true }
