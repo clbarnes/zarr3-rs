@@ -42,8 +42,11 @@ pub struct DefaultChunkKeyEncoding {
 
 impl ChunkKeyEncoder for DefaultChunkKeyEncoding {
     fn encode(&self, coord: ChunkCoord) -> String {
+        if coord.is_empty() {
+            panic!("No coord given");
+        }
         let sep = self.separator.to_string();
-        let mut s = String::from("c");
+        let s = String::from("c");
         coord
             .iter()
             .map(|n| n.to_string())

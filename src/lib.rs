@@ -32,7 +32,7 @@ impl Ndim for RegularChunkGrid {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(tag = "name", content = "configuration")]
+#[serde(tag = "name", content = "configuration", rename_all = "lowercase")]
 #[enum_delegate::implement(MaybeNdim)]
 pub enum ChunkGrid {
     Regular(RegularChunkGrid),
@@ -175,6 +175,74 @@ pub enum Metadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EXAMPLE_ARRAY_META: &'static str = r#"
+        {
+            "zarr_format": 3,
+            "node_type": "array",
+            "shape": [10000, 1000],
+            "dimension_names": ["rows", "columns"],
+            "data_type": "float64",
+            "chunk_grid": {
+                "name": "regular",
+                "configuration": {
+                    "chunk_shape": [1000, 100]
+                }
+            },
+            "chunk_key_encoding": {
+                "name": "default",
+                "configuration": {
+                    "separator": "/"
+                }
+            },
+            "codecs": [{
+                "name": "gzip",
+                "configuration": {
+                    "level": 1
+                }
+            }],
+            "fill_value": "NaN",
+            "attributes": {
+                "foo": 42,
+                "bar": "apples",
+                "baz": [1, 2, 3, 4]
+            }
+        }
+    "#;
+
+    const EXAMPLE_GROUP_META: &'static str = r#"
+        {
+            "zarr_format": 3,
+            "node_type": "group",
+            "attributes": {
+                "foo": 42,
+                "bar": "apples",
+                "baz": [1, 2, 3, 4]
+            }
+        }
+    "#;
+
+    #[test]
+    fn array_meta_roundtrip() {
+        let meta: Metadata =
+            serde_json::from_str(EXAMPLE_ARRAY_META).expect("Could not deserialise array metadata");
+        match meta {
+            Metadata::Array(_) => (),
+            _ => panic!("Expected array metadata"),
+        };
+        let s2 = serde_json::to_string(&meta).expect("Couldn't serialize array metadata");
+    }
+
+    #[test]
+    fn group_meta_roundtrip() {
+        let meta: Metadata =
+            serde_json::from_str(EXAMPLE_GROUP_META).expect("Could not deserialise group metadata");
+        match meta {
+            Metadata::Group(_) => (),
+            _ => panic!("Expected group metadata"),
+        };
+        let s2 = serde_json::to_string(&meta).expect("Couldn't serialize group metadata");
+    }
 
     // #[test]
     // fn it_works() {

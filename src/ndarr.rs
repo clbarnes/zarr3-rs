@@ -1,5 +1,5 @@
 use crate::{
-    codecs::{aa::Order, ab::Endian},
+    codecs::{aa::Order, ab::endian::Endian},
     data_types::{DataType, NBytes},
     CoordVec,
 };

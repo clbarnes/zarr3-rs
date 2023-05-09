@@ -1,11 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::io;
+use std::io::{self, BufRead, Cursor, Read, Write};
 
 use crate::codecs::bb::BBCodec;
 use blosc::{decompress_bytes, Context};
 pub use blosc::{Clevel, Compressor, ShuffleMode};
-
-use super::ByteReader;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct BloscCodec {
@@ -184,6 +182,23 @@ where
     }
 }
 
+impl TryInto<Context> for &BloscCodec {
+    type Error = ();
+
+    fn try_into(self) -> Result<Context, Self::Error> {
+        let ctx = Context::new()
+            .compressor(self.cname)?
+            .clevel(self.clevel)
+            .shuffle(self.shuffle)
+            .blocksize(if self.blocksize == 0 {
+                None
+            } else {
+                Some(self.blocksize)
+            });
+        Ok(ctx)
+    }
+}
+
 impl Default for BloscCodec {
     fn default() -> Self {
         Self {
@@ -195,25 +210,80 @@ impl Default for BloscCodec {
     }
 }
 
-impl BBCodec for BloscCodec {
-    fn encode(&self, raw: &[u8]) -> Vec<u8> {
-        let ctx = Context::new()
-            .compressor(self.cname)
-            .expect("Compressor not enabled")
-            .clevel(self.clevel)
-            .shuffle(self.shuffle)
-            .blocksize(if self.blocksize == 0 {
-                None
-            } else {
-                Some(self.blocksize)
-            });
-        ctx.compress(raw).into()
+struct BloscReader<R: Read> {
+    r: R,
+    buf: Option<Cursor<Vec<u8>>>,
+}
+
+impl<R: Read> BloscReader<R> {
+    fn new(r: R) -> Self {
+        Self { r, buf: None }
     }
 
-    fn decode(&self, mut encoded: Box<dyn ByteReader>) -> io::Result<Box<dyn ByteReader>> {
-        let buf = encoded.read()?;
-        // this is safe because the bytes are not coerced into another type
-        let result = unsafe { decompress_bytes::<u8>(&buf) }.expect("could not decompress");
-        Ok(Box::new(io::Cursor::new(result)))
+    /// This wraps an unsafe decompression of blosc-encoded bytes.
+    /// It is relatively safe, because we are not changing the data type
+    /// (decoding bytes into bytes).
+    /// However, we cannot guarantee that the encoded data is trustworthy.
+    fn unsafe_decompress(b: &[u8]) -> io::Result<Vec<u8>> {
+        unsafe { decompress_bytes(b) }
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Could not decompress with blosc"))
+    }
+
+    fn buffer(&mut self) -> io::Result<&mut Cursor<Vec<u8>>> {
+        if self.buf.is_none() {
+            let mut compressed = Vec::default();
+            self.r.read_to_end(&mut compressed)?;
+
+            let decomp: Vec<u8> = Self::unsafe_decompress(&compressed)?;
+            self.buf = Some(Cursor::new(decomp));
+        }
+        Ok(self.buf.as_mut().unwrap())
+    }
+}
+
+impl<R: Read> Read for BloscReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Read::read(&mut self.buffer()?, buf)
+    }
+}
+
+struct BloscWriter<W: Write> {
+    w: W,
+    pub ctx: Context,
+}
+
+impl<W: Write> BloscWriter<W> {
+    fn new(codec: &BloscCodec, w: W) -> Self {
+        let ctx = codec.try_into().expect("Blosc codec not enabled");
+        Self { w, ctx }
+    }
+}
+
+impl<W: Write> Write for BloscWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // write to intermediate buffer instead, compress on flush?
+        let compressed: Vec<_> = self.ctx.compress(buf).into();
+        // input length if write successful, else actual written length.
+        self.w.write(&compressed).map(|written| {
+            if written == compressed.len() {
+                buf.len()
+            } else {
+                written
+            }
+        })
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.w.flush()
+    }
+}
+
+impl BBCodec for BloscCodec {
+    fn encode<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
+        Box::new(BloscWriter::new(self, w))
+    }
+
+    fn decode<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
+        Box::new(BloscReader::new(r))
     }
 }
