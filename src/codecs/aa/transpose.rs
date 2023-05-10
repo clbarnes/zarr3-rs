@@ -128,13 +128,11 @@ impl AACodec for TransposeCodec {
         }
     }
 
-    fn compute_encoded_shape(&self, decoded_shape: &[usize]) -> Vec<usize>  {
+    fn compute_encoded_shape(&self, decoded_shape: &[usize]) -> Vec<usize> {
         match &self.order {
             Order::C => decoded_shape.to_vec(),
             Order::F => decoded_shape.iter().rev().cloned().collect(),
-            Order::Permutation(p) => {
-                p.iter().map(|idx| decoded_shape[*idx]).collect()
-            }
+            Order::Permutation(p) => p.iter().map(|idx| decoded_shape[*idx]).collect(),
         }
     }
 }

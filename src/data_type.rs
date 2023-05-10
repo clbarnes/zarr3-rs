@@ -1,14 +1,16 @@
 use std::{
     fmt::Display,
-    io::{self, BufReader, Read, Write},
-    str::FromStr, ops::{Deref, DerefMut},
+    io::{self, BufReader, BufWriter, Read, Write},
+    ops::{Deref, DerefMut},
+    str::FromStr,
 };
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use half::f16;
-use ndarray::{Array, ArrayD};
+use ndarray::{Array, ArrayD, Data};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
+use smallvec::{smallvec, SmallVec};
 
 use crate::codecs::ab::endian::Endian;
 
@@ -69,7 +71,7 @@ impl NBytes for IntSize {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum FloatSize {
-    b16,
+    // b16,
     b32,
     b64,
 }
@@ -85,7 +87,7 @@ impl TryFrom<usize> for FloatSize {
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         match value {
-            16 => Ok(Self::b16),
+            // 16 => Ok(Self::b16),
             32 => Ok(Self::b32),
             64 => Ok(Self::b64),
             _ => Err("not a valid float size"),
@@ -96,7 +98,7 @@ impl TryFrom<usize> for FloatSize {
 impl NBytes for FloatSize {
     fn nbytes(&self) -> usize {
         match self {
-            Self::b16 => 2,
+            // Self::b16 => 2,
             Self::b32 => 4,
             Self::b64 => 8,
         }
@@ -306,250 +308,6 @@ fn chunk_iter<T, I: Iterator<Item = T>>(it: &mut I, buf: &mut [T]) -> usize {
     count
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ArrayIo<T: ReflectedType>(pub ArrayD<T>);
-
-impl<T: ReflectedType> Deref for ArrayIo<T> {
-    type Target = ArrayD<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T: ReflectedType> DerefMut for ArrayIo<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl<T: ReflectedType> Into<ArrayD<T>> for ArrayIo<T> {
-    fn into(self) -> ArrayD<T> {
-        self.0
-    }
-}
-
-impl<T: ReflectedType> From<ArrayD<T>> for ArrayIo<T> {
-    fn from(a: ArrayD<T>) -> Self {
-        Self(a)
-    }
-}
-
-macro_rules! data_io_impl {
-    ($ty_name:ty, $bo_read_fn:ident, $bo_write_fn:ident) => {
-        impl WriteNdArray<$ty_name> for ArrayIo<$ty_name> {
-            fn write_to<W: Write>(self, mut w: W, endian: Endian) -> io::Result<()> {
-                let CHUNK: usize = 256;
-                let type_len = <$ty_name>::ZARR_TYPE.nbytes();
-                let mut item_buf: Vec<$ty_name> = vec![0 as $ty_name; CHUNK];
-                let mut buf: Vec<u8> = vec![0; CHUNK * type_len];
-                let mut items = self.into_iter();
-
-                let mut n_items = CHUNK;
-
-                while n_items >= CHUNK {
-                    let n_items = chunk_iter(&mut items, &mut item_buf[..]);
-                    let n_bytes = n_items * type_len;
-                    match endian {
-                        Endian::Big => {
-                            BigEndian::$bo_write_fn(&item_buf[..n_items], &mut buf[..n_bytes])
-                        }
-                        Endian::Little => {
-                            LittleEndian::$bo_write_fn(&item_buf[..n_items], &mut buf[..n_bytes])
-                        }
-                    };
-                    w.write_all(&buf[..n_bytes])?;
-                }
-                Ok(())
-            }
-        }
-
-        impl ReadToNdArray<$ty_name> for ArrayIo<$ty_name> {
-            fn read_from<R: Read>(
-                mut r: R,
-                endian: Endian,
-                shape: Vec<usize>,
-            ) -> Result<Self, &'static str> {
-                let mut v = Vec::default();
-                match endian {
-                    Endian::Big => r.$bo_read_fn::<BigEndian>(v.as_mut()),
-                    Endian::Little => r.$bo_read_fn::<LittleEndian>(v.as_mut()),
-                };
-                ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-            }
-        }
-    };
-}
-
-// Wrapper trait to erase a generic trait argument for consistent ByteOrder
-// signatures.
-trait ReadBytesExtI8: ReadBytesExt {
-    fn read_i8_into_wrapper<B: ByteOrder>(&mut self, dst: &mut [i8]) -> io::Result<()> {
-        self.read_i8_into(dst)
-    }
-}
-impl<T: ReadBytesExt> ReadBytesExtI8 for T {}
-
-data_io_impl!(u16, read_u16_into, write_u16_into);
-data_io_impl!(u32, read_u32_into, write_u32_into);
-data_io_impl!(u64, read_u64_into, write_u64_into);
-data_io_impl!(i8, read_i8_into_wrapper, write_i8_into);
-data_io_impl!(i16, read_i16_into, write_i16_into);
-data_io_impl!(i32, read_i32_into, write_i32_into);
-data_io_impl!(i64, read_i64_into, write_i64_into);
-data_io_impl!(f32, read_f32_into, write_f32_into);
-data_io_impl!(f64, read_f64_into, write_f64_into);
-
-impl WriteNdArray<c64> for ArrayIo<c64> {
-    fn write_to<W: Write>(self, mut w: W, endian: Endian) -> io::Result<()> {
-        let CHUNK: usize = 256;
-        let type_len = <c64>::ZARR_TYPE.nbytes();
-        let mut item_buf: Vec<f32> = vec![0.0; CHUNK * 2];
-        let mut buf: Vec<u8> = vec![0; CHUNK * type_len];
-        let mut items = self.into_iter().flat_map(|c| [c.re, c.im].into_iter());
-
-        let mut n_items = CHUNK;
-
-        while n_items >= CHUNK {
-            let n_items = chunk_iter(&mut items, &mut item_buf[..]);
-            let n_bytes = n_items * type_len;
-            match endian {
-                Endian::Big => BigEndian::write_f32_into(&item_buf[..n_items], &mut buf[..n_bytes]),
-                Endian::Little => {
-                    LittleEndian::write_f32_into(&item_buf[..n_items], &mut buf[..n_bytes])
-                }
-            };
-            w.write_all(&buf[..n_bytes])?;
-        }
-        Ok(())
-    }
-}
-
-impl WriteNdArray<c128> for ArrayIo<c128> {
-    fn write_to<W: Write>(self, mut w: W, endian: Endian) -> io::Result<()> {
-        let CHUNK: usize = 256;
-        let type_len = <c128>::ZARR_TYPE.nbytes();
-        let mut item_buf: Vec<f64> = vec![0.0; CHUNK * 2];
-        let mut buf: Vec<u8> = vec![0; CHUNK * type_len];
-        let mut items = self.into_iter().flat_map(|c| [c.re, c.im].into_iter());
-
-        let mut n_items = CHUNK;
-
-        while n_items >= CHUNK {
-            let n_items = chunk_iter(&mut items, &mut item_buf[..]);
-            let n_bytes = n_items * type_len;
-            match endian {
-                Endian::Big => BigEndian::write_f64_into(&item_buf[..n_items], &mut buf[..n_bytes]),
-                Endian::Little => {
-                    LittleEndian::write_f64_into(&item_buf[..n_items], &mut buf[..n_bytes])
-                }
-            };
-            w.write_all(&buf[..n_bytes])?;
-        }
-        Ok(())
-    }
-}
-
-impl ReadToNdArray<c64> for ArrayIo<c64> {
-    fn read_from<R: Read>(
-        mut r: R,
-        endian: Endian,
-        shape: Vec<usize>,
-    ) -> Result<Self, &'static str> {
-        let mut floats: Vec<f32> = Vec::default();
-        match endian {
-            Endian::Big => r.read_f32_into::<BigEndian>(floats.as_mut()),
-            Endian::Little => r.read_f32_into::<LittleEndian>(floats.as_mut()),
-        };
-
-        let v: Vec<_> = floats
-            .chunks_exact(2)
-            .map(|re_im| c64::new(re_im[0], re_im[1]))
-            .collect();
-        ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-    }
-}
-
-impl ReadToNdArray<c128> for ArrayIo<c128> {
-    fn read_from<R: Read>(
-        mut r: R,
-        endian: Endian,
-        shape: Vec<usize>,
-    ) -> Result<Self, &'static str> {
-        let mut floats: Vec<f64> = Vec::default();
-        match endian {
-            Endian::Big => r.read_f64_into::<BigEndian>(floats.as_mut()),
-            Endian::Little => r.read_f64_into::<LittleEndian>(floats.as_mut()),
-        };
-
-        let v: Vec<_> = floats
-            .chunks_exact(2)
-            .map(|re_im| c128::new(re_im[0], re_im[1]))
-            .collect();
-        ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-    }
-}
-
-impl WriteNdArray<u8> for ArrayIo<u8> {
-    fn write_to<W: Write>(self, mut w: W, endian: Endian) -> io::Result<()> {
-        const CHUNK: usize = 256;
-        let mut buf: [u8; CHUNK] = [0; CHUNK];
-
-        let mut idx = 0;
-        for item in self.into_iter() {
-            buf[idx] = item;
-            idx += 1;
-            if idx >= buf.len() {
-                w.write_all(&mut buf[..]);
-                idx = 0;
-            }
-        }
-        w.write_all(&buf[..idx])
-    }
-}
-
-impl ReadToNdArray<u8> for ArrayIo<u8> {
-    fn read_from<R: Read>(
-        mut r: R,
-        endian: Endian,
-        shape: Vec<usize>,
-    ) -> Result<Self, &'static str> {
-        let mut v = Vec::default();
-        r.read_to_end(&mut v);
-        ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-    }
-}
-
-impl WriteNdArray<bool> for ArrayIo<bool> {
-    fn write_to<W: Write>(self, mut w: W, endian: Endian) -> io::Result<()> {
-        const CHUNK: usize = 256;
-        let mut buf: [u8; CHUNK] = [0; CHUNK];
-
-        let mut idx = 0;
-        for item in self.into_iter() {
-            buf[idx] = if item { 1 } else { 0 };
-            idx += 1;
-            if idx >= buf.len() {
-                w.write_all(&mut buf[..]);
-                idx = 0;
-            }
-        }
-        w.write_all(&buf[..idx])
-    }
-}
-
-impl ReadToNdArray<bool> for ArrayIo<bool> {
-    fn read_from<R: Read>(
-        mut r: R,
-        endian: Endian,
-        shape: Vec<usize>,
-    ) -> Result<Self, &'static str> {
-        let mut br = BufReader::new(r);
-        let v: Vec<_> = br.bytes().map(|b| b.unwrap() > 0).collect();
-        ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-    }
-}
-
 /// Trait implemented by primitive types that are reflected in Zarr.
 ///
 /// The supertraits are not necessary for this trait, but are used to
@@ -562,11 +320,45 @@ pub trait ReflectedType:
 {
     const ZARR_TYPE: DataType;
 
+    // this is to avoid a match in a hot loop but the Box deref might be slower anyway?
+    /// Produce a routine which writes the bytes of a self-typed value
+    /// into the given buffer.
+    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])>;
+
+    /// Produce a routine which reads a self-typed value from
+    /// the given byte buffer.
+    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self>;
+
     // todo: replace array reading/writing with these
     // use bufreader & bufwriter, read however many bytes we need for a single item, use std (to|from)_[lb]e_bytes
-    fn write_array_to<W: Write>(array: ArrayD<Self>, w: W, endian: Endian) -> io::Result<()>;
+    fn write_array_to<W: Write>(array: ArrayD<Self>, mut w: W, endian: Endian) -> io::Result<()> {
+        let mut bw = BufWriter::new(w);
+        let mut buf = vec![0u8; Self::ZARR_TYPE.nbytes()];
+        let encoder = Self::encoder(endian);
 
-    fn read_array_from<R: Read>(r: R, endian: Endian, shape: &[usize]) -> ArrayD<Self>;
+        for val in array.into_iter() {
+            encoder(val, buf.as_mut());
+            bw.write(buf.as_mut()).unwrap();
+        }
+        bw.flush()
+    }
+
+    fn read_array_from<R: Read>(mut r: R, endian: Endian, shape: &[usize]) -> ArrayD<Self> {
+        let mut br = BufReader::new(r);
+        let mut buf = vec![0u8; Self::ZARR_TYPE.nbytes()];
+        let decoder = Self::decoder(endian);
+
+        let numel = shape.iter().cloned().reduce(|a, b| a * b).unwrap_or(1);
+
+        let mut data = Vec::with_capacity(numel);
+
+        for _ in 0..numel {
+            br.read_exact(buf.as_mut()).unwrap();
+            data.push(decoder(buf.as_mut()));
+        }
+
+        ArrayD::from_shape_vec(shape.to_vec(), data).unwrap()
+    }
 
     // fn create_data_chunk(grid_position: &GridCoord, num_el: u32) -> VecDataChunk<Self> {
     //     VecDataChunk::<Self>::new(
@@ -576,73 +368,229 @@ pub trait ReflectedType:
     // }
 }
 
-macro_rules! reflected_type {
-    ($d_name:expr, $d_type:ty) => {
+macro_rules! reflected_primitive {
+    ($d_name:expr, $d_type:ty, $bo_read_fn:ident, $bo_write_fn:ident) => {
         impl ReflectedType for $d_type {
             const ZARR_TYPE: DataType = $d_name;
+
+            fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+                Box::new(match endian {
+                    Endian::Big => |v: Self, mut buf: &mut [u8]| BigEndian::$bo_write_fn(buf, v),
+                    Endian::Little => {
+                        |v: Self, mut buf: &mut [u8]| LittleEndian::$bo_write_fn(buf, v)
+                    }
+                })
+            }
+
+            /// Produce a routine which reads a self-typed value from
+            /// the given byte buffer.
+            fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+                Box::new(match endian {
+                    Endian::Big => |mut buf: &mut [u8]| BigEndian::$bo_read_fn(buf),
+                    Endian::Little => |mut buf: &mut [u8]| LittleEndian::$bo_read_fn(buf),
+                })
+            }
         }
     };
 }
 
-reflected_type!(DataType::Bool, bool);
-reflected_type!(DataType::UInt(IntSize::b8), u8);
-reflected_type!(DataType::UInt(IntSize::b16), u16);
-reflected_type!(DataType::UInt(IntSize::b32), u32);
-reflected_type!(DataType::UInt(IntSize::b64), u64);
-reflected_type!(DataType::Int(IntSize::b8), i8);
-reflected_type!(DataType::Int(IntSize::b16), i16);
-reflected_type!(DataType::Int(IntSize::b32), i32);
-reflected_type!(DataType::Int(IntSize::b64), i64);
-reflected_type!(DataType::Float(FloatSize::b16), f16);
-reflected_type!(DataType::Float(FloatSize::b32), f32);
-reflected_type!(DataType::Float(FloatSize::b64), f64);
-reflected_type!(DataType::Complex(ComplexSize::b64), c64);
-reflected_type!(DataType::Complex(ComplexSize::b128), c128);
+impl ReflectedType for bool {
+    const ZARR_TYPE: DataType = DataType::Bool;
+
+    fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+        Box::new(|v: Self, mut buf: &mut [u8]| buf[0] = if v { 1 } else { 0 })
+    }
+
+    fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+        Box::new(|mut buf: &mut [u8]| if buf[0] == 0 { false } else { true })
+    }
+}
+
+impl ReflectedType for u8 {
+    const ZARR_TYPE: DataType = DataType::UInt(IntSize::b8);
+
+    fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+        Box::new(|v: Self, mut buf: &mut [u8]| buf[0] = v)
+    }
+
+    fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+        Box::new(|mut buf: &mut [u8]| buf[0])
+    }
+}
+
+impl ReflectedType for i8 {
+    const ZARR_TYPE: DataType = DataType::UInt(IntSize::b8);
+
+    fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+        Box::new(|v: Self, mut buf: &mut [u8]| buf.write_i8(v).unwrap())
+    }
+
+    fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+        // todo: kludge to get type bounds to work, should be a better way
+        Box::new(|mut buf: &mut [u8]| Self::from_le_bytes([buf[0]]))
+    }
+}
+
+reflected_primitive!(DataType::UInt(IntSize::b16), u16, read_u16, write_u16);
+reflected_primitive!(DataType::UInt(IntSize::b32), u32, read_u32, write_u32);
+reflected_primitive!(DataType::UInt(IntSize::b64), u64, read_u64, write_u64);
+reflected_primitive!(DataType::Int(IntSize::b16), i16, read_i16, write_i16);
+reflected_primitive!(DataType::Int(IntSize::b32), i32, read_i32, write_i32);
+reflected_primitive!(DataType::Int(IntSize::b64), i64, read_i64, write_i64);
+reflected_primitive!(DataType::Float(FloatSize::b32), f32, read_f32, write_f32);
+reflected_primitive!(DataType::Float(FloatSize::b64), f64, read_f64, write_f64);
+
+impl ReflectedType for c64 {
+    const ZARR_TYPE: DataType = DataType::Complex(ComplexSize::b64);
+
+    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+        Box::new(match endian {
+            Endian::Big => |v: Self, mut buf: &mut [u8]| {
+                buf.write_f32::<BigEndian>(v.re).unwrap();
+                buf.write_f32::<BigEndian>(v.im).unwrap();
+            },
+            Endian::Little => |v, mut buf| {
+                buf.write_f32::<LittleEndian>(v.re).unwrap();
+                buf.write_f32::<LittleEndian>(v.im).unwrap();
+            },
+        })
+    }
+
+    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+        Box::new(match endian {
+            Endian::Big => |mut buf| {
+                let re = BigEndian::read_f32(buf);
+                let im = BigEndian::read_f32(buf);
+                Self::new(re, im)
+            },
+            Endian::Little => |mut buf| {
+                let re = LittleEndian::read_f32(buf);
+                let im = LittleEndian::read_f32(buf);
+                Self::new(re, im)
+            },
+        })
+    }
+}
+
+impl ReflectedType for c128 {
+    const ZARR_TYPE: DataType = DataType::Complex(ComplexSize::b64);
+
+    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+        Box::new(match endian {
+            Endian::Big => |v: Self, mut buf: &mut [u8]| {
+                buf.write_f64::<BigEndian>(v.re).unwrap();
+                buf.write_f64::<BigEndian>(v.im).unwrap();
+            },
+            Endian::Little => |v, mut buf| {
+                buf.write_f64::<LittleEndian>(v.re).unwrap();
+                buf.write_f64::<LittleEndian>(v.im).unwrap();
+            },
+        })
+    }
+
+    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+        Box::new(match endian {
+            Endian::Big => |mut buf| {
+                let re = BigEndian::read_f64(buf);
+                let im = BigEndian::read_f64(buf);
+                Self::new(re, im)
+            },
+            Endian::Little => |mut buf| {
+                let re = LittleEndian::read_f64(buf);
+                let im = LittleEndian::read_f64(buf);
+                Self::new(re, im)
+            },
+        })
+    }
+}
 
 macro_rules! reflected_raw {
-    ($($nbytes:expr),*) => {
+    ($($nbytes:expr), *) => {
         $(
-            reflected_type!(DataType::Raw($nbytes*8), [u8; $nbytes]);
+        impl ReflectedType for [u8; $nbytes] {
+            const ZARR_TYPE: DataType = DataType::Raw($nbytes * 8);
 
-            impl WriteNdArray<[u8; $nbytes]> for ArrayIo<[u8; $nbytes]> {
-                fn write_to<W: Write>(self, mut w: W, _endian: Endian) -> io::Result<()> {
-                    let CHUNK: usize = 256;
-                    let mut buf: Vec<u8> = vec![0; CHUNK * $nbytes];
-
-                    let mut idx = 0;
-                    for item in self.into_iter() {
-                        for i in item.into_iter() {
-                            buf[idx] = i;
-                            idx += 1;
-                        }
-                        if idx >= buf.len() {
-                            w.write_all(&buf[..])?;
-                            idx = 0;
-                        }
-                    }
-                    w.write_all(&buf[..idx])
-                }
+            fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+                Box::new(|v: Self, buf: &mut[u8]| {
+                    buf.copy_from_slice(&v);
+                })
             }
 
-            impl ReadToNdArray<[u8; $nbytes]> for ArrayIo<[u8; $nbytes]> {
-                fn read_from<R: Read>(mut r: R, _endian: Endian, shape: Vec<usize>) -> Result<Self, &'static str> {
-                    let mut v = Vec::default();
-                    let mut br = BufReader::new(r);
-                    let mut buf = [0u8; $nbytes];
-                    loop {
-                        match br.read_exact(&mut buf[..]) {
-                            Ok(_) => v.push(buf.clone()),
-                            Err(_) => break,
-                        };
-                    }
-                    ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-                }
+            /// Produce a routine which reads a self-typed value from
+            /// the given byte buffer.
+            fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+                Box::new(|mut buf: &mut[u8]| {
+                    let mut out = [0; $nbytes];
+                    out.as_mut().copy_from_slice(buf);
+                    out
+                })
             }
-        )*
+        }
+    )*
     }
 }
 
 reflected_raw!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
+
+// reflected_type!(DataType::Bool, bool);
+// reflected_type!(DataType::UInt(IntSize::b8), u8);
+// reflected_type!(DataType::UInt(IntSize::b16), u16);
+// reflected_type!(DataType::UInt(IntSize::b32), u32);
+// reflected_type!(DataType::UInt(IntSize::b64), u64);
+// reflected_type!(DataType::Int(IntSize::b8), i8);
+// reflected_type!(DataType::Int(IntSize::b16), i16);
+// reflected_type!(DataType::Int(IntSize::b32), i32);
+// reflected_type!(DataType::Int(IntSize::b64), i64);
+// reflected_type!(DataType::Float(FloatSize::b16), f16);
+// reflected_type!(DataType::Float(FloatSize::b32), f32);
+// reflected_type!(DataType::Float(FloatSize::b64), f64);
+// reflected_type!(DataType::Complex(ComplexSize::b64), c64);
+// reflected_type!(DataType::Complex(ComplexSize::b128), c128);
+
+// macro_rules! reflected_raw {
+//     ($($nbytes:expr),*) => {
+//         $(
+//             reflected_type!(DataType::Raw($nbytes*8), [u8; $nbytes]);
+
+//             impl WriteNdArray<[u8; $nbytes]> for ArrayIo<[u8; $nbytes]> {
+//                 fn write_to<W: Write>(self, mut w: W, _endian: Endian) -> io::Result<()> {
+//                     let CHUNK: usize = 256;
+//                     let mut buf: Vec<u8> = vec![0; CHUNK * $nbytes];
+
+//                     let mut idx = 0;
+//                     for item in self.into_iter() {
+//                         for i in item.into_iter() {
+//                             buf[idx] = i;
+//                             idx += 1;
+//                         }
+//                         if idx >= buf.len() {
+//                             w.write_all(&buf[..])?;
+//                             idx = 0;
+//                         }
+//                     }
+//                     w.write_all(&buf[..idx])
+//                 }
+//             }
+
+//             impl ReadToNdArray<[u8; $nbytes]> for ArrayIo<[u8; $nbytes]> {
+//                 fn read_from<R: Read>(mut r: R, _endian: Endian, shape: Vec<usize>) -> Result<Self, &'static str> {
+//                     let mut v = Vec::default();
+//                     let mut br = BufReader::new(r);
+//                     let mut buf = [0u8; $nbytes];
+//                     loop {
+//                         match br.read_exact(&mut buf[..]) {
+//                             Ok(_) => v.push(buf.clone()),
+//                             Err(_) => break,
+//                         };
+//                     }
+//                     ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
+//                 }
+//             }
+//         )*
+//     }
+// }
+
+// reflected_raw!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 
 #[cfg(test)]
 mod tests {
@@ -661,7 +609,7 @@ mod tests {
             (r#""uint16""#, UInt(IntSize::b16)),
             (r#""uint32""#, UInt(IntSize::b32)),
             (r#""uint64""#, UInt(IntSize::b64)),
-            (r#""float16""#, Float(FloatSize::b16)),
+            // (r#""float16""#, Float(FloatSize::b16)),
             (r#""float32""#, Float(FloatSize::b32)),
             (r#""float64""#, Float(FloatSize::b64)),
             (r#""complex64""#, Complex(ComplexSize::b64)),

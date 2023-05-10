@@ -1,7 +1,4 @@
-use crate::{
-    data_type::{ReadToNdArray, WriteNdArray, ArrayIo},
-    CoordVec, MaybeNdim,
-};
+use crate::{CoordVec, MaybeNdim};
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -57,17 +54,10 @@ impl EndianCodec {
 
 impl ABCodec for EndianCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
-        todo!()
-        // ArrayIo::from(decoded).write_to(w, self.endian).unwrap()
+        T::write_array_to(decoded, w, self.endian);
     }
 
-    fn decode<R: Read, T: ReflectedType>(
-        &self,
-        r: R,
-        shape: Vec<usize>,
-    ) -> ArrayD<T> {
-        ArrayIo::<T>::read_from(r, self.endian, shape).unwrap().into()
-        // let res: Result<N, &'static str> = N::read_from(r, self.endian, shape);
-        // res.unwrap().into()
+    fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ArrayD<T> {
+        T::read_array_from(r, self.endian, shape.as_slice())
     }
 }

@@ -1,4 +1,4 @@
-use std::io::{Write, Read};
+use std::io::{Read, Write};
 
 use ndarray::{Array, ArrayD};
 use serde::{Deserialize, Serialize};
@@ -8,11 +8,14 @@ pub mod aa;
 pub mod ab;
 pub mod bb;
 
-use aa::{AACodecType, AACodec};
-use ab::{ABCodecType, ABCodec};
-use bb::{BBCodecType, BBCodec};
+use aa::{AACodec, AACodecType};
+use ab::{ABCodec, ABCodecType};
+use bb::{BBCodec, BBCodecType};
 
-use crate::{MaybeNdim, data_type::{ReflectedType, ReadToNdArray, WriteNdArray, ArrayIo}};
+use crate::{
+    data_type::{ReadToNdArray, ReflectedType, WriteNdArray},
+    MaybeNdim,
+};
 
 struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,
@@ -41,12 +44,11 @@ impl ABCodec for CodecChain {
         self.ab_codec.encode(arr.into(), bb_w);
     }
 
-    fn decode<R: Read, T: ReflectedType>(
-        &self,
-        r: R,
-        shape: Vec<usize>,
-    ) -> ndarray::ArrayD<T> {
-        let ab_shape = self.aa_codecs.as_slice().compute_encoded_shape(shape.as_slice());
+    fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ndarray::ArrayD<T> {
+        let ab_shape = self
+            .aa_codecs
+            .as_slice()
+            .compute_encoded_shape(shape.as_slice());
         let bb_r = self.bb_codecs.as_slice().decoder(r);
         let arr = self.ab_codec.decode(bb_r, ab_shape);
         self.aa_codecs.as_slice().decode(arr)
