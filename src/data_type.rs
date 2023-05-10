@@ -1,16 +1,14 @@
 use std::{
     fmt::Display,
     io::{self, BufReader, BufWriter, Read, Write},
-    ops::{Deref, DerefMut},
     str::FromStr,
 };
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-use half::f16;
-use ndarray::{Array, ArrayD, Data};
+
+use ndarray::ArrayD;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
-use smallvec::{smallvec, SmallVec};
 
 use crate::codecs::ab::endian::Endian;
 
@@ -331,7 +329,7 @@ pub trait ReflectedType:
 
     // todo: replace array reading/writing with these
     // use bufreader & bufwriter, read however many bytes we need for a single item, use std (to|from)_[lb]e_bytes
-    fn write_array_to<W: Write>(array: ArrayD<Self>, mut w: W, endian: Endian) -> io::Result<()> {
+    fn write_array_to<W: Write>(array: ArrayD<Self>, w: W, endian: Endian) -> io::Result<()> {
         let mut bw = BufWriter::new(w);
         let mut buf = vec![0u8; Self::ZARR_TYPE.nbytes()];
         let encoder = Self::encoder(endian);
@@ -343,7 +341,7 @@ pub trait ReflectedType:
         bw.flush()
     }
 
-    fn read_array_from<R: Read>(mut r: R, endian: Endian, shape: &[usize]) -> ArrayD<Self> {
+    fn read_array_from<R: Read>(r: R, endian: Endian, shape: &[usize]) -> ArrayD<Self> {
         let mut br = BufReader::new(r);
         let mut buf = vec![0u8; Self::ZARR_TYPE.nbytes()];
         let decoder = Self::decoder(endian);
@@ -375,10 +373,8 @@ macro_rules! reflected_primitive {
 
             fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
                 Box::new(match endian {
-                    Endian::Big => |v: Self, mut buf: &mut [u8]| BigEndian::$bo_write_fn(buf, v),
-                    Endian::Little => {
-                        |v: Self, mut buf: &mut [u8]| LittleEndian::$bo_write_fn(buf, v)
-                    }
+                    Endian::Big => |v: Self, buf: &mut [u8]| BigEndian::$bo_write_fn(buf, v),
+                    Endian::Little => |v: Self, buf: &mut [u8]| LittleEndian::$bo_write_fn(buf, v),
                 })
             }
 
@@ -386,8 +382,8 @@ macro_rules! reflected_primitive {
             /// the given byte buffer.
             fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
                 Box::new(match endian {
-                    Endian::Big => |mut buf: &mut [u8]| BigEndian::$bo_read_fn(buf),
-                    Endian::Little => |mut buf: &mut [u8]| LittleEndian::$bo_read_fn(buf),
+                    Endian::Big => |buf: &mut [u8]| BigEndian::$bo_read_fn(buf),
+                    Endian::Little => |buf: &mut [u8]| LittleEndian::$bo_read_fn(buf),
                 })
             }
         }
@@ -398,11 +394,11 @@ impl ReflectedType for bool {
     const ZARR_TYPE: DataType = DataType::Bool;
 
     fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-        Box::new(|v: Self, mut buf: &mut [u8]| buf[0] = if v { 1 } else { 0 })
+        Box::new(|v: Self, buf: &mut [u8]| buf[0] = if v { 1 } else { 0 })
     }
 
     fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        Box::new(|mut buf: &mut [u8]| if buf[0] == 0 { false } else { true })
+        Box::new(|buf: &mut [u8]| if buf[0] == 0 { false } else { true })
     }
 }
 
@@ -410,11 +406,11 @@ impl ReflectedType for u8 {
     const ZARR_TYPE: DataType = DataType::UInt(IntSize::b8);
 
     fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-        Box::new(|v: Self, mut buf: &mut [u8]| buf[0] = v)
+        Box::new(|v: Self, buf: &mut [u8]| buf[0] = v)
     }
 
     fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        Box::new(|mut buf: &mut [u8]| buf[0])
+        Box::new(|buf: &mut [u8]| buf[0])
     }
 }
 
@@ -427,7 +423,7 @@ impl ReflectedType for i8 {
 
     fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
         // todo: kludge to get type bounds to work, should be a better way
-        Box::new(|mut buf: &mut [u8]| Self::from_le_bytes([buf[0]]))
+        Box::new(|buf: &mut [u8]| Self::from_le_bytes([buf[0]]))
     }
 }
 
@@ -458,12 +454,12 @@ impl ReflectedType for c64 {
 
     fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
         Box::new(match endian {
-            Endian::Big => |mut buf| {
+            Endian::Big => |buf| {
                 let re = BigEndian::read_f32(buf);
                 let im = BigEndian::read_f32(buf);
                 Self::new(re, im)
             },
-            Endian::Little => |mut buf| {
+            Endian::Little => |buf| {
                 let re = LittleEndian::read_f32(buf);
                 let im = LittleEndian::read_f32(buf);
                 Self::new(re, im)
@@ -490,12 +486,12 @@ impl ReflectedType for c128 {
 
     fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
         Box::new(match endian {
-            Endian::Big => |mut buf| {
+            Endian::Big => |buf| {
                 let re = BigEndian::read_f64(buf);
                 let im = BigEndian::read_f64(buf);
                 Self::new(re, im)
             },
-            Endian::Little => |mut buf| {
+            Endian::Little => |buf| {
                 let re = LittleEndian::read_f64(buf);
                 let im = LittleEndian::read_f64(buf);
                 Self::new(re, im)
@@ -518,8 +514,8 @@ macro_rules! reflected_raw {
 
             /// Produce a routine which reads a self-typed value from
             /// the given byte buffer.
-            fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-                Box::new(|mut buf: &mut[u8]| {
+            fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+                Box::new(|buf: &mut[u8]| {
                     let mut out = [0; $nbytes];
                     out.as_mut().copy_from_slice(buf);
                     out

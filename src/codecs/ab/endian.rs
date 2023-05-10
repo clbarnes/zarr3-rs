@@ -1,4 +1,4 @@
-use crate::{CoordVec, MaybeNdim};
+use crate::MaybeNdim;
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};

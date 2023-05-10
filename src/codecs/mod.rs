@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use ndarray::{Array, ArrayD};
+use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -12,10 +12,7 @@ use aa::{AACodec, AACodecType};
 use ab::{ABCodec, ABCodecType};
 use bb::{BBCodec, BBCodecType};
 
-use crate::{
-    data_type::{ReadToNdArray, ReflectedType, WriteNdArray},
-    MaybeNdim,
-};
+use crate::{data_type::ReflectedType, MaybeNdim};
 
 struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,

@@ -236,7 +236,7 @@ mod tests {
             Metadata::Array(_) => (),
             _ => panic!("Expected array metadata"),
         };
-        let s2 = serde_json::to_string(&meta).expect("Couldn't serialize array metadata");
+        let _s2 = serde_json::to_string(&meta).expect("Couldn't serialize array metadata");
     }
 
     #[test]
@@ -247,6 +247,6 @@ mod tests {
             Metadata::Group(_) => (),
             _ => panic!("Expected group metadata"),
         };
-        let s2 = serde_json::to_string(&meta).expect("Couldn't serialize group metadata");
+        let _s2 = serde_json::to_string(&meta).expect("Couldn't serialize group metadata");
     }
 }
