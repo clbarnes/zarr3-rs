@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{data_type::ReflectedType, MaybeNdim};
 mod transpose;
-use transpose::TransposeCodec;
+pub use transpose::TransposeCodec;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "lowercase", tag = "codec", content = "configuration")]

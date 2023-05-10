@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::MaybeNdim;
 
 #[cfg(feature = "blosc")]
-mod blosc_codec;
+pub mod blosc_codec;
 #[cfg(feature = "gzip")]
-mod gzip_codec;
+pub mod gzip_codec;
 
 /// Common interface for compressing writers and decompressing readers.
 pub trait BBCodec {

@@ -236,3 +236,59 @@ pub enum CodecType {
     AB(ABCodecType),
     BB(BBCodecType),
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::codecs::ab::endian::EndianCodec;
+    use crate::codecs::bb::gzip_codec::GzipCodec;
+
+    use super::*;
+
+    const SHAPE: [usize; 3] = [3, 4, 5];
+
+    fn make_arr() -> ArrayD<f64> {
+        ArrayD::from_shape_vec(SHAPE.to_vec(), (0..60).map(|v| v as f64).collect()).unwrap()
+    }
+
+    #[test]
+    fn array_roundtrip_simple() {
+        let arr = make_arr();
+        let chain = CodecChain::default();
+        let mut buf: Vec<u8> = Vec::default();
+
+        chain.encode(arr.clone(), &mut buf);
+        assert_ne!(buf.len(), 0);
+
+        let arr2 = chain.decode::<_, f64>(buf.as_slice(), SHAPE.to_vec());
+
+        assert_eq!(&arr, &arr2);
+    }
+
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn array_meta_roundtrip_complicated() {
+        use crate::codecs::aa::TransposeCodec;
+
+        let arr = make_arr();
+        let chain = CodecChain::new(
+            vec![
+                AACodecType::Transpose(TransposeCodec::new_f()),
+                AACodecType::Transpose(TransposeCodec::new_f()),
+                AACodecType::Transpose(TransposeCodec::new_f()),
+            ],
+            Some(ABCodecType::Endian(EndianCodec::new_big())),
+            vec![
+                BBCodecType::Gzip(GzipCodec::default()),
+                BBCodecType::Gzip(GzipCodec { level: 2 }),
+            ],
+        );
+        let mut buf: Vec<u8> = Vec::default();
+
+        chain.encode(arr.clone(), &mut buf);
+        assert_ne!(buf.len(), 0);
+
+        let arr2 = chain.decode::<_, f64>(buf.as_slice(), SHAPE.to_vec());
+
+        assert_eq!(&arr, &arr2);
+    }
+}
