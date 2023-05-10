@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
 
 use ndarray::ArrayD;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
@@ -288,23 +288,6 @@ impl FromStr for DataType {
 pub type c64 = num_complex::Complex32;
 #[allow(non_camel_case_types)]
 pub type c128 = num_complex::Complex64;
-
-pub trait WriteNdArray<T: ReflectedType> {
-    fn write_to<W: Write>(self, w: W, endian: Endian) -> io::Result<()>;
-}
-
-pub trait ReadToNdArray<T: ReflectedType>: Sized {
-    fn read_from<R: Read>(r: R, endian: Endian, shape: Vec<usize>) -> Result<Self, &'static str>;
-}
-
-fn chunk_iter<T, I: Iterator<Item = T>>(it: &mut I, buf: &mut [T]) -> usize {
-    let mut count = 0;
-    for item in it.take(buf.len()) {
-        buf[count] = item;
-        count += 1;
-    }
-    count
-}
 
 /// Trait implemented by primitive types that are reflected in Zarr.
 ///

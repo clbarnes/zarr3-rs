@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use codecs::CodecType;
+use codecs::CodecChain;
 use data_type::{DataType, ReflectedType};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -71,8 +71,9 @@ pub struct ArrayMetadata {
     fill_value: serde_json::Value,
     #[serde(default = "Vec::default")]
     storage_transformers: Vec<StorageTransformer>,
-    #[serde(default = "Vec::default")]
-    codecs: Vec<CodecType>,
+    // todo: store CodecChain instead
+    #[serde(default = "CodecChain::default")]
+    codecs: CodecChain,
     #[serde(default = "HashMap::default")]
     attributes: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,9 +105,8 @@ impl ArrayMetadata {
                 return Err("Inconsistent dimensionality");
             }
         }
-        for c in self.codecs.iter() {
-            self.union_ndim(c)?;
-        }
+        self.codecs.validate_ndim()?;
+        self.union_ndim(&self.codecs)?;
 
         Ok(())
     }

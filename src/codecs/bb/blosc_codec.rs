@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::io::{self, BufRead, Cursor, Read, Write};
+use std::io::{self, Cursor, Read, Write};
 
 use crate::codecs::bb::BBCodec;
 use blosc::{decompress_bytes, Context};

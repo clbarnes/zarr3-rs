@@ -1,7 +1,10 @@
-use std::io::{Read, Write};
+use std::{
+    collections::HashSet,
+    io::{Read, Write},
+};
 
 use ndarray::ArrayD;
-use serde::{Deserialize, Serialize};
+use serde::{de, ser::SerializeSeq, Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 pub mod aa;
@@ -14,9 +17,10 @@ use bb::{BBCodec, BBCodecType};
 
 use crate::{data_type::ReflectedType, MaybeNdim};
 
-struct CodecChain {
+#[derive(Clone, PartialEq, Debug)]
+pub struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,
-    pub ab_codec: ABCodecType,
+    pub ab_codec: Option<ABCodecType>,
     pub bb_codecs: Vec<BBCodecType>,
 }
 
@@ -28,9 +32,116 @@ impl CodecChain {
     ) -> Self {
         Self {
             aa_codecs,
-            ab_codec: ab_codec.unwrap_or_else(|| ABCodecType::default()),
+            ab_codec: ab_codec,
             bb_codecs,
         }
+    }
+
+    pub fn ab_codec(&self) -> ABCodecType {
+        // todo: unnecessary clones?
+        // would be nice to return a ref but can't with the default
+        self.ab_codec.clone().unwrap_or_default()
+    }
+
+    pub fn aa_codecs_mut(&mut self) -> &mut Vec<AACodecType> {
+        &mut self.aa_codecs
+    }
+
+    pub fn bb_codecs_mut(&mut self) -> &mut Vec<BBCodecType> {
+        &mut self.bb_codecs
+    }
+
+    pub fn replace_ab_codec<T: Into<ABCodecType>>(
+        &mut self,
+        ab_codec: Option<T>,
+    ) -> Option<ABCodecType> {
+        std::mem::replace(&mut self.ab_codec, ab_codec.map(|c| c.into()))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn len(&self) -> usize {
+        let mut out = self.aa_codecs.len() + self.bb_codecs.len();
+        if self.ab_codec.is_some() {
+            out += 1
+        }
+        out
+    }
+}
+
+impl MaybeNdim for CodecChain {
+    fn maybe_ndim(&self) -> Option<usize> {
+        for c in self.aa_codecs.iter() {
+            if let Some(n) = c.maybe_ndim() {
+                return Some(n);
+            }
+        }
+        if let Some(c) = self.ab_codec.as_ref() {
+            if let Some(n) = c.maybe_ndim() {
+                return Some(n);
+            }
+        }
+        // BB codecs can't have dimensionality
+        None
+    }
+
+    fn validate_ndim(&self) -> Result<(), &'static str> {
+        let mut ndims = HashSet::with_capacity(self.len());
+
+        for ndim in self.aa_codecs.iter().filter_map(|c| c.maybe_ndim()) {
+            ndims.insert(ndim);
+        }
+        if let Some(c) = self.ab_codec.as_ref() {
+            if let Some(n) = c.maybe_ndim() {
+                ndims.insert(n);
+            }
+        }
+        if ndims.len() > 1 {
+            Err("Inconsistent codec dimensionalities")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Default for CodecChain {
+    fn default() -> Self {
+        Self::new(Vec::default(), None, Vec::default())
+    }
+}
+
+impl Serialize for CodecChain {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for aa in self.aa_codecs.iter() {
+            seq.serialize_element(aa)?;
+        }
+        if let Some(ab) = &self.ab_codec {
+            seq.serialize_element(ab)?;
+        }
+        for bb in self.bb_codecs.iter() {
+            seq.serialize_element(bb)?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for CodecChain {
+    fn deserialize<D>(deserializer: D) -> Result<CodecChain, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let codecs: Vec<CodecType> = Vec::<CodecType>::deserialize(deserializer)?;
+        let chain = codecs
+            .into_iter()
+            .collect::<Result<CodecChain, CodecChainConstructionError>>()
+            .map_err(de::Error::custom)?;
+        Ok(chain)
     }
 }
 
@@ -38,7 +149,7 @@ impl ABCodec for CodecChain {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
         let bb_w = self.bb_codecs.as_slice().encoder(w);
         let arr = self.aa_codecs.as_slice().encode(decoded.into());
-        self.ab_codec.encode(arr.into(), bb_w);
+        self.ab_codec().encode(arr.into(), bb_w);
     }
 
     fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ndarray::ArrayD<T> {
@@ -47,7 +158,7 @@ impl ABCodec for CodecChain {
             .as_slice()
             .compute_encoded_shape(shape.as_slice());
         let bb_r = self.bb_codecs.as_slice().decoder(r);
-        let arr = self.ab_codec.decode(bb_r, ab_shape);
+        let arr = self.ab_codec().decode(bb_r, ab_shape);
         self.aa_codecs.as_slice().decode(arr)
     }
 }

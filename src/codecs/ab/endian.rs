@@ -54,7 +54,7 @@ impl EndianCodec {
 
 impl ABCodec for EndianCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
-        T::write_array_to(decoded, w, self.endian);
+        T::write_array_to(decoded, w, self.endian).unwrap();
     }
 
     fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ArrayD<T> {
