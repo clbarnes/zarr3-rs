@@ -1,4 +1,6 @@
-use ndarray::Array;
+use std::io::{Write, Read};
+
+use ndarray::{Array, ArrayD};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -6,15 +8,11 @@ pub mod aa;
 pub mod ab;
 pub mod bb;
 
-use aa::AACodecType;
-use ab::ABCodecType;
-use bb::BBCodecType;
+use aa::{AACodecType, AACodec};
+use ab::{ABCodecType, ABCodec};
+use bb::{BBCodecType, BBCodec};
 
-use crate::MaybeNdim;
-
-// pub trait ArrayReader {
-//     fn read(&self) -> Array<>
-// }
+use crate::{MaybeNdim, data_type::{ReflectedType, ReadToNdArray, WriteNdArray, ArrayIo}};
 
 struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,
@@ -33,6 +31,25 @@ impl CodecChain {
             ab_codec: ab_codec.unwrap_or_else(|| ABCodecType::default()),
             bb_codecs,
         }
+    }
+}
+
+impl ABCodec for CodecChain {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+        let bb_w = self.bb_codecs.as_slice().encoder(w);
+        let arr = self.aa_codecs.as_slice().encode(decoded.into());
+        self.ab_codec.encode(arr.into(), bb_w);
+    }
+
+    fn decode<R: Read, T: ReflectedType>(
+        &self,
+        r: R,
+        shape: Vec<usize>,
+    ) -> ndarray::ArrayD<T> {
+        let ab_shape = self.aa_codecs.as_slice().compute_encoded_shape(shape.as_slice());
+        let bb_r = self.bb_codecs.as_slice().decoder(r);
+        let arr = self.ab_codec.decode(bb_r, ab_shape);
+        self.aa_codecs.as_slice().decode(arr)
     }
 }
 
@@ -103,6 +120,7 @@ impl FromIterator<CodecType> for Result<CodecChain, CodecChainConstructionError>
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[enum_delegate::implement(MaybeNdim)]
+#[serde(untagged)]
 pub enum CodecType {
     AA(AACodecType),
     AB(ABCodecType),

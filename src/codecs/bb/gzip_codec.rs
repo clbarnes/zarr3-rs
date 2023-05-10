@@ -41,11 +41,11 @@ impl Default for GzipCodec {
 }
 
 impl BBCodec for GzipCodec {
-    fn encode<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
+    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
         Box::new(GzEncoder::new(w, self.get_compression()))
     }
 
-    fn decode<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
+    fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
         Box::new(GzDecoder::new(r))
     }
 }

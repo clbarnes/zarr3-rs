@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
 use codecs::CodecType;
-use data_types::DataType;
+use data_type::{DataType, ReflectedType};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 mod chunk_arr;
 pub mod chunk_key_encoding;
 pub mod codecs;
-mod data_types;
-mod ndarr;
+mod data_type;
 mod util;
 
 use chunk_key_encoding::ChunkKeyEncoding;
@@ -98,7 +97,7 @@ impl ArrayMetadata {
     }
 
     /// Ensure that all dimensioned metadata is consistent.
-    fn validate_dimensions(&self) -> Result<(), &'static str> {
+    pub fn validate_dimensions(&self) -> Result<(), &'static str> {
         self.union_ndim(&self.chunk_grid)?;
         if let Some(d) = &self.dimension_names {
             if d.len() != self.ndim() {
@@ -110,6 +109,11 @@ impl ArrayMetadata {
         }
 
         Ok(())
+    }
+
+    pub fn get_effective_fill_value<T: ReflectedType>(&self) -> Result<T, &'static str> {
+        serde_json::from_value(self.fill_value.clone())
+            .map_err(|_| "Could not deserialize fill value")
     }
 }
 
@@ -176,6 +180,7 @@ pub enum Metadata {
 mod tests {
     use super::*;
 
+    // from the spec, although with "extensions" removed
     const EXAMPLE_ARRAY_META: &'static str = r#"
         {
             "zarr_format": 3,
@@ -210,6 +215,7 @@ mod tests {
         }
     "#;
 
+    // as above, minus array-specific keys
     const EXAMPLE_GROUP_META: &'static str = r#"
         {
             "zarr_format": 3,
@@ -243,10 +249,4 @@ mod tests {
         };
         let s2 = serde_json::to_string(&meta).expect("Couldn't serialize group metadata");
     }
-
-    // #[test]
-    // fn it_works() {
-    //     let result = add(2, 2);
-    //     assert_eq!(result, 4);
-    // }
 }

@@ -1,5 +1,5 @@
 [package]
-name = "zarr-binary-shard"
+name = "zarr3"
 version = "0.1.0"
 edition = "2021"
 
@@ -32,6 +32,7 @@ ndarray = "0.15.6"
 serde_with = "3.0.0"
 enum_delegate = "0.2.0"
 log = "0.4.17"
+num-complex = { version = "0.4", features = ["serde"] }
 # fs2 = { version = "0.4", optional = true }
 # itertools = { version = "0.8", optional = true }
 # lz4 = { version = "1.23", optional = true }
