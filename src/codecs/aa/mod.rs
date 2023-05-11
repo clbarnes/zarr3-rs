@@ -1,7 +1,7 @@
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 
-use crate::{data_type::ReflectedType, variant_from_data, MaybeNdim};
+use crate::{data_type::ReflectedType, MaybeNdim};
 mod transpose;
 pub use transpose::TransposeCodec;
 

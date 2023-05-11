@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn build_arraymeta() {
-        let meta =
+        let _meta =
             ArrayMetadataBuilder::new(smallvec![100, 200, 300], DataType::Float(FloatSize::b32))
                 .chunk_grid(vec![10, 10, 10].as_slice())
                 .unwrap()
