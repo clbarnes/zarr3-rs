@@ -177,6 +177,79 @@ impl TryFrom<ExtensibleDataType> for DataType {
     }
 }
 
+impl DataType {
+    pub fn default_fill_value(&self) -> serde_json::Value {
+        match self {
+            DataType::Bool => serde_json::Value::from(false),
+            DataType::Int(_) | DataType::UInt(_) => serde_json::Value::from(0),
+            DataType::Float(_) => serde_json::Value::from(0),
+            // N.B. this presumes complex ser format
+            DataType::Complex(_) => serde_json::Value::from(vec![0.0, 0.0]),
+            DataType::Raw(s) => serde_json::Value::from(vec![0; s / 8]),
+        }
+    }
+
+    pub fn validate_json_value(&self, value: &serde_json::Value) -> Result<(), serde_json::Error> {
+        let v = value.clone();
+        match self {
+            DataType::Bool => {
+                serde_json::from_value::<bool>(v)?;
+            }
+            DataType::Int(s) => match s {
+                IntSize::b8 => {
+                    serde_json::from_value::<i8>(v)?;
+                }
+                IntSize::b16 => {
+                    serde_json::from_value::<i16>(v)?;
+                }
+                IntSize::b32 => {
+                    serde_json::from_value::<i32>(v)?;
+                }
+                IntSize::b64 => {
+                    serde_json::from_value::<i64>(v)?;
+                }
+            },
+            DataType::UInt(s) => match s {
+                IntSize::b8 => {
+                    serde_json::from_value::<u8>(v)?;
+                }
+                IntSize::b16 => {
+                    serde_json::from_value::<u16>(v)?;
+                }
+                IntSize::b32 => {
+                    serde_json::from_value::<u32>(v)?;
+                }
+                IntSize::b64 => {
+                    serde_json::from_value::<u64>(v)?;
+                }
+            },
+            DataType::Float(s) => match s {
+                FloatSize::b32 => {
+                    serde_json::from_value::<f32>(v)?;
+                }
+                FloatSize::b64 => {
+                    serde_json::from_value::<f64>(v)?;
+                }
+            },
+            DataType::Complex(s) => match s {
+                ComplexSize::b64 => {
+                    serde_json::from_value::<c64>(v)?;
+                }
+                ComplexSize::b128 => {
+                    serde_json::from_value::<c128>(v)?;
+                }
+            },
+            DataType::Raw(s) => {
+                let b = serde_json::from_value::<Vec<u8>>(v)?;
+                if b.len() != *s {
+                    return Err(de::Error::invalid_length(b.len(), &"Wrong length"));
+                }
+            }
+        };
+        Ok(())
+    }
+}
+
 // todo: as extension dtypes are added, we can either separate by
 // known/unknown or core/ extension.
 // Extension must continue to support unknown with fallbacks,
@@ -297,7 +370,14 @@ pub type c128 = num_complex::Complex64;
 // `DeserializedOwned` is necessary for deserialization of metadata `fill_value`.
 // TODO: spec does not say how to deserialize complex fill_value; we'll go with whatever num_complex has implemented
 pub trait ReflectedType:
-    Send + Sync + Clone + Default + serde::de::DeserializeOwned + 'static + Sized
+    Send
+    + Sync
+    + Clone
+    + Default
+    + serde::de::DeserializeOwned
+    + 'static
+    + Sized
+    + serde::ser::Serialize
 {
     const ZARR_TYPE: DataType;
 
@@ -511,66 +591,6 @@ macro_rules! reflected_raw {
 
 reflected_raw!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 
-// reflected_type!(DataType::Bool, bool);
-// reflected_type!(DataType::UInt(IntSize::b8), u8);
-// reflected_type!(DataType::UInt(IntSize::b16), u16);
-// reflected_type!(DataType::UInt(IntSize::b32), u32);
-// reflected_type!(DataType::UInt(IntSize::b64), u64);
-// reflected_type!(DataType::Int(IntSize::b8), i8);
-// reflected_type!(DataType::Int(IntSize::b16), i16);
-// reflected_type!(DataType::Int(IntSize::b32), i32);
-// reflected_type!(DataType::Int(IntSize::b64), i64);
-// reflected_type!(DataType::Float(FloatSize::b16), f16);
-// reflected_type!(DataType::Float(FloatSize::b32), f32);
-// reflected_type!(DataType::Float(FloatSize::b64), f64);
-// reflected_type!(DataType::Complex(ComplexSize::b64), c64);
-// reflected_type!(DataType::Complex(ComplexSize::b128), c128);
-
-// macro_rules! reflected_raw {
-//     ($($nbytes:expr),*) => {
-//         $(
-//             reflected_type!(DataType::Raw($nbytes*8), [u8; $nbytes]);
-
-//             impl WriteNdArray<[u8; $nbytes]> for ArrayIo<[u8; $nbytes]> {
-//                 fn write_to<W: Write>(self, mut w: W, _endian: Endian) -> io::Result<()> {
-//                     let CHUNK: usize = 256;
-//                     let mut buf: Vec<u8> = vec![0; CHUNK * $nbytes];
-
-//                     let mut idx = 0;
-//                     for item in self.into_iter() {
-//                         for i in item.into_iter() {
-//                             buf[idx] = i;
-//                             idx += 1;
-//                         }
-//                         if idx >= buf.len() {
-//                             w.write_all(&buf[..])?;
-//                             idx = 0;
-//                         }
-//                     }
-//                     w.write_all(&buf[..idx])
-//                 }
-//             }
-
-//             impl ReadToNdArray<[u8; $nbytes]> for ArrayIo<[u8; $nbytes]> {
-//                 fn read_from<R: Read>(mut r: R, _endian: Endian, shape: Vec<usize>) -> Result<Self, &'static str> {
-//                     let mut v = Vec::default();
-//                     let mut br = BufReader::new(r);
-//                     let mut buf = [0u8; $nbytes];
-//                     loop {
-//                         match br.read_exact(&mut buf[..]) {
-//                             Ok(_) => v.push(buf.clone()),
-//                             Err(_) => break,
-//                         };
-//                     }
-//                     ArrayD::from_shape_vec(shape, v).map_err(|_| "Incompatible shape").map(|a| a.into())
-//                 }
-//             }
-//         )*
-//     }
-// }
-
-// reflected_raw!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,5 +639,87 @@ mod tests {
         };
         let d: DataType = dt.try_into().expect("Could not fall back");
         assert_eq!(d, DataType::UInt(IntSize::b8));
+    }
+
+    #[test]
+    /// Ensure that DataType's default fill value is reflected type default value
+    fn reflected_defaults() {
+        assert_eq!(
+            bool::default(),
+            serde_json::from_value::<bool>(DataType::Bool.default_fill_value()).unwrap()
+        );
+
+        assert_eq!(
+            u8::default(),
+            serde_json::from_value::<u8>(DataType::UInt(IntSize::b8).default_fill_value()).unwrap()
+        );
+        assert_eq!(
+            u16::default(),
+            serde_json::from_value::<u16>(DataType::UInt(IntSize::b16).default_fill_value())
+                .unwrap()
+        );
+        assert_eq!(
+            u32::default(),
+            serde_json::from_value::<u32>(DataType::UInt(IntSize::b32).default_fill_value())
+                .unwrap()
+        );
+        assert_eq!(
+            u64::default(),
+            serde_json::from_value::<u64>(DataType::UInt(IntSize::b64).default_fill_value())
+                .unwrap()
+        );
+
+        assert_eq!(
+            i8::default(),
+            serde_json::from_value::<i8>(DataType::Int(IntSize::b8).default_fill_value()).unwrap()
+        );
+        assert_eq!(
+            i16::default(),
+            serde_json::from_value::<i16>(DataType::Int(IntSize::b16).default_fill_value())
+                .unwrap()
+        );
+        assert_eq!(
+            i32::default(),
+            serde_json::from_value::<i32>(DataType::Int(IntSize::b32).default_fill_value())
+                .unwrap()
+        );
+        assert_eq!(
+            i64::default(),
+            serde_json::from_value::<i64>(DataType::Int(IntSize::b64).default_fill_value())
+                .unwrap()
+        );
+
+        assert_eq!(
+            f32::default(),
+            serde_json::from_value::<f32>(DataType::Float(FloatSize::b32).default_fill_value())
+                .unwrap()
+        );
+        assert_eq!(
+            f64::default(),
+            serde_json::from_value::<f64>(DataType::Float(FloatSize::b64).default_fill_value())
+                .unwrap()
+        );
+
+        assert_eq!(
+            c64::default(),
+            serde_json::from_value::<c64>(DataType::Complex(ComplexSize::b64).default_fill_value())
+                .unwrap()
+        );
+        assert_eq!(
+            c128::default(),
+            serde_json::from_value::<c128>(
+                DataType::Complex(ComplexSize::b128).default_fill_value()
+            )
+            .unwrap()
+        );
+
+        assert_eq!(
+            <[u8; 1]>::default(),
+            serde_json::from_value::<[u8; 1]>(DataType::Raw(8).default_fill_value()).unwrap()
+        );
+        assert_eq!(
+            <[u8; 16]>::default(),
+            serde_json::from_value::<[u8; 16]>(DataType::Raw(128).default_fill_value()).unwrap()
+        );
     }
 }

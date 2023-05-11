@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::{data_type::ReflectedType, MaybeNdim};
+use crate::{data_type::ReflectedType, variant_from_data, MaybeNdim};
 
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
@@ -52,3 +52,5 @@ impl Default for ABCodecType {
         Self::Endian(EndianCodec::default())
     }
 }
+
+variant_from_data!(ABCodecType, Endian, EndianCodec);

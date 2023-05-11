@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
-use crate::MaybeNdim;
+use crate::{variant_from_data, MaybeNdim};
 
 #[cfg(feature = "blosc")]
 pub mod blosc_codec;
@@ -92,18 +92,9 @@ impl BBCodec for &[BBCodecType] {
     }
 }
 
-macro_rules! compression_from_impl {
-    ($variant:ident, $c_type:ty) => {
-        impl std::convert::From<$c_type> for BBCodecType {
-            fn from(c: $c_type) -> Self {
-                BBCodecType::$variant(c)
-            }
-        }
-    };
-}
-
 #[cfg(feature = "gzip")]
-compression_from_impl!(Gzip, gzip_codec::GzipCodec);
+variant_from_data!(BBCodecType, Gzip, gzip_codec::GzipCodec);
+// compression_from_impl!(Gzip, gzip_codec::GzipCodec);
 
 #[cfg(feature = "blosc")]
-compression_from_impl!(Blosc, blosc_codec::BloscCodec);
+variant_from_data!(BBCodecType, Blosc, blosc_codec::BloscCodec);

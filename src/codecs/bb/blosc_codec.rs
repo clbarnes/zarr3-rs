@@ -8,15 +8,15 @@ pub use blosc::{Clevel, Compressor, ShuffleMode};
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct BloscCodec {
     #[serde(deserialize_with = "cname_from_str", serialize_with = "cname_to_str")]
-    cname: Compressor,
+    pub cname: Compressor,
     #[serde(deserialize_with = "clevel_from_str", serialize_with = "clevel_to_str")]
-    clevel: Clevel,
+    pub clevel: Clevel,
     #[serde(
         deserialize_with = "shuffle_from_int",
         serialize_with = "shuffle_to_int"
     )]
-    shuffle: ShuffleMode,
-    blocksize: usize,
+    pub shuffle: ShuffleMode,
+    pub blocksize: usize,
 }
 
 fn clevel_eq(c1: Clevel, c2: Clevel) -> bool {
