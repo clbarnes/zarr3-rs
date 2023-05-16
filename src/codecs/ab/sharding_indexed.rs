@@ -1,4 +1,4 @@
-use ndarray::{Array, ArrayD};
+use ndarray::{ArrayD};
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Cursor, Read, Seek};
 use thiserror::Error;

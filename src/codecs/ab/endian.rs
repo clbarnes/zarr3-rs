@@ -1,7 +1,7 @@
 use crate::{codecs::ArrayRepr, CoordVec, MaybeNdim};
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
+
 use std::io::{Read, Write};
 
 use super::ABCodec;

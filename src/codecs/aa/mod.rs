@@ -1,4 +1,4 @@
-use ndarray::{Array, ArrayD};
+use ndarray::{ArrayD};
 use serde::{Deserialize, Serialize};
 
 use crate::{data_type::ReflectedType, MaybeNdim};
