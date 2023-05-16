@@ -2,11 +2,11 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ChunkCoord;
+use crate::GridCoord;
 
 #[enum_delegate::register]
 pub trait ChunkKeyEncoder {
-    fn encode(&self, coord: ChunkCoord) -> String;
+    fn encode(&self, coord: GridCoord) -> String;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -41,7 +41,7 @@ pub struct DefaultChunkKeyEncoding {
 }
 
 impl ChunkKeyEncoder for DefaultChunkKeyEncoding {
-    fn encode(&self, coord: ChunkCoord) -> String {
+    fn encode(&self, coord: GridCoord) -> String {
         if coord.is_empty() {
             panic!("No coord given");
         }
@@ -69,7 +69,7 @@ pub struct V2ChunkKeyEncoding {
 }
 
 impl ChunkKeyEncoder for V2ChunkKeyEncoding {
-    fn encode(&self, coord: ChunkCoord) -> String {
+    fn encode(&self, coord: GridCoord) -> String {
         let sep = self.separator.to_string();
         coord
             .iter()

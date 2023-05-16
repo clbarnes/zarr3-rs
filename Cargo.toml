@@ -33,6 +33,7 @@ serde_with = "3.0.0"
 enum_delegate = "0.2.0"
 log = "0.4.17"
 num-complex = { version = "0.4", features = ["serde"] }
+itertools = "0.10.5"
 # fs2 = { version = "0.4", optional = true }
 # itertools = { version = "0.8", optional = true }
 # lz4 = { version = "1.23", optional = true }

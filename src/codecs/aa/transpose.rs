@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{data_type::ReflectedType, CoordVec, MaybeNdim};
+use crate::{codecs::ArrayRepr, data_type::ReflectedType, CoordVec, MaybeNdim};
 
 use super::AACodec;
 
@@ -128,11 +128,16 @@ impl AACodec for TransposeCodec {
         }
     }
 
-    fn compute_encoded_shape(&self, decoded_shape: &[usize]) -> Vec<usize> {
-        match &self.order {
-            Order::C => decoded_shape.to_vec(),
-            Order::F => decoded_shape.iter().rev().cloned().collect(),
-            Order::Permutation(p) => p.iter().map(|idx| decoded_shape[*idx]).collect(),
+    fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr {
+        let shape = match &self.order {
+            Order::C => decoded_repr.shape,
+            Order::F => decoded_repr.shape.iter().rev().cloned().collect(),
+            Order::Permutation(p) => p.iter().map(|idx| decoded_repr.shape[*idx]).collect(),
+        };
+        ArrayRepr {
+            shape,
+            data_type: decoded_repr.data_type,
+            fill_value: decoded_repr.fill_value,
         }
     }
 }

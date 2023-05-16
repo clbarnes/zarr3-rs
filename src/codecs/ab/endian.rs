@@ -1,6 +1,7 @@
-use crate::MaybeNdim;
+use crate::{codecs::ArrayRepr, CoordVec, MaybeNdim};
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::io::{Read, Write};
 
 use super::ABCodec;
@@ -57,7 +58,9 @@ impl ABCodec for EndianCodec {
         T::write_array_to(decoded, w, self.endian).unwrap();
     }
 
-    fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ArrayD<T> {
+    fn decode<R: Read, T: ReflectedType>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+        // todo: check for mismatch between T::ZARR_TYPE and decoded_repr.data_type
+        let shape: CoordVec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
         T::read_array_from(r, self.endian, shape.as_slice())
     }
 }

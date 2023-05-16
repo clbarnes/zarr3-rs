@@ -11,7 +11,6 @@ const COORD_SMALLVEC_SIZE: usize = 6;
 pub const ZARR_FORMAT: usize = 3;
 
 pub type CoordVec<T> = SmallVec<[T; COORD_SMALLVEC_SIZE]>;
-pub type ChunkCoord = CoordVec<u32>;
 pub type GridCoord = CoordVec<u64>;
 
 #[enum_delegate::register]

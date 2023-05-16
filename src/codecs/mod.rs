@@ -15,7 +15,10 @@ use aa::{AACodec, AACodecType};
 use ab::{ABCodec, ABCodecType};
 use bb::{BBCodec, BBCodecType};
 
-use crate::{data_type::ReflectedType, MaybeNdim};
+use crate::{
+    data_type::{DataType, ReflectedType},
+    GridCoord, MaybeNdim,
+};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct CodecChain {
@@ -152,39 +155,20 @@ impl ABCodec for CodecChain {
         self.ab_codec().encode(arr.into(), bb_w);
     }
 
-    fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ndarray::ArrayD<T> {
-        let ab_shape = self
+    fn decode<R: Read, T: ReflectedType>(
+        &self,
+        r: R,
+        decoded_repr: ArrayRepr,
+    ) -> ndarray::ArrayD<T> {
+        let ab_repr = self
             .aa_codecs
             .as_slice()
-            .compute_encoded_shape(shape.as_slice());
+            .compute_encoded_representation(decoded_repr);
         let bb_r = self.bb_codecs.as_slice().decoder(r);
-        let arr = self.ab_codec().decode(bb_r, ab_shape);
+        let arr = self.ab_codec().decode(bb_r, ab_repr);
         self.aa_codecs.as_slice().decode(arr)
     }
 }
-
-/// This implementation bulldozes potential errors,
-/// distributing AA and BB codecs correctly
-/// and only using the last AB codec.
-/// It may have unexpected behaviour when passing region descriptions through.
-// impl FromIterator<CodecType> for CodecChain {
-
-//     fn from_iter<T: IntoIterator<Item = CodecType>>(iter: T) -> Self {
-//         let mut aa_codecs = Vec::default();
-//         let mut ab_codec = None;
-//         let mut bb_codecs = Vec::default();
-
-//         for ce in iter {
-//             match ce {
-//                 CodecType::AA(c) => aa_codecs.push(c),
-//                 CodecType::AB(c) => {ab_codec = Some(c); },
-//                 CodecType::BB(c) => bb_codecs.push(c),
-//             }
-//         }
-
-//         CodecChain { aa_codecs, ab_codec, bb_codecs }
-//     }
-// }
 
 #[derive(Error, Debug)]
 pub enum CodecChainConstructionError {
@@ -237,10 +221,36 @@ pub enum CodecType {
     BB(BBCodecType),
 }
 
+#[derive(Debug, Clone)]
+pub struct ArrayRepr {
+    pub shape: GridCoord,
+    pub data_type: DataType,
+    pub fill_value: serde_json::Value,
+}
+
+impl ArrayRepr {
+    pub fn new<S: Serialize>(
+        shape: &[u64],
+        data_type: DataType,
+        fill_value: S,
+    ) -> Result<Self, &'static str> {
+        let fill = serde_json::to_value(fill_value).map_err(|_| "Could not serialize value")?;
+        let s = shape.iter().cloned().collect();
+        data_type.validate_json_value(&fill);
+        let repr = ArrayRepr {
+            shape: s,
+            data_type,
+            fill_value: fill,
+        };
+        Ok(repr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::codecs::ab::endian::EndianCodec;
     use crate::codecs::bb::gzip_codec::GzipCodec;
+    use crate::data_type::FloatSize;
 
     use super::*;
 
@@ -259,7 +269,13 @@ mod tests {
         chain.encode(arr.clone(), &mut buf);
         assert_ne!(buf.len(), 0);
 
-        let arr2 = chain.decode::<_, f64>(buf.as_slice(), SHAPE.to_vec());
+        let repr = ArrayRepr {
+            shape: SHAPE.iter().map(|s| *s as u64).collect(),
+            data_type: DataType::Float(FloatSize::b64),
+            fill_value: serde_json::to_value(0.0).unwrap(),
+        };
+
+        let arr2 = chain.decode::<_, f64>(buf.as_slice(), repr);
 
         assert_eq!(&arr, &arr2);
     }
@@ -287,7 +303,13 @@ mod tests {
         chain.encode(arr.clone(), &mut buf);
         assert_ne!(buf.len(), 0);
 
-        let arr2 = chain.decode::<_, f64>(buf.as_slice(), SHAPE.to_vec());
+        let repr = ArrayRepr {
+            shape: SHAPE.iter().map(|s| *s as u64).collect(),
+            data_type: DataType::Float(FloatSize::b64),
+            fill_value: serde_json::to_value(0.0).unwrap(),
+        };
+
+        let arr2 = chain.decode::<_, f64>(buf.as_slice(), repr);
 
         assert_eq!(&arr, &arr2);
     }

@@ -8,12 +8,15 @@ use serde::{Deserialize, Serialize};
 // use sharding_indexed::ShardingIndexedCodec;
 
 pub mod endian;
+pub mod sharding_indexed;
 use endian::EndianCodec;
+
+use super::ArrayRepr;
 
 pub trait ABCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W);
 
-    fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ArrayD<T>;
+    fn decode<R: Read, T: ReflectedType>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T>;
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -30,9 +33,9 @@ impl ABCodec for ABCodecType {
         }
     }
 
-    fn decode<R: Read, T: ReflectedType>(&self, r: R, shape: Vec<usize>) -> ArrayD<T> {
+    fn decode<R: Read, T: ReflectedType>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
         match self {
-            ABCodecType::Endian(e) => e.decode::<R, T>(r, shape),
+            ABCodecType::Endian(e) => e.decode::<R, T>(r, decoded_repr),
         }
     }
 }

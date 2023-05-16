@@ -65,6 +65,7 @@ impl Extension {
     }
 }
 
+/// Use the [ArrayMetadataBuilder] to construct this in a convenient way.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArrayMetadata {
     zarr_format: usize,
@@ -92,7 +93,7 @@ impl Ndim for ArrayMetadata {
 }
 
 impl ArrayMetadata {
-    pub fn new(
+    pub fn new_unchecked(
         zarr_format: usize,
         shape: GridCoord,
         data_type: DataType,
@@ -118,6 +119,37 @@ impl ArrayMetadata {
             dimension_names,
             extensions,
         }
+    }
+
+    pub fn new(
+        zarr_format: usize,
+        shape: GridCoord,
+        data_type: DataType,
+        chunk_grid: ChunkGrid,
+        chunk_key_encoding: ChunkKeyEncoding,
+        fill_value: serde_json::Value,
+        storage_transformers: Vec<StorageTransformer>,
+        codecs: CodecChain,
+        attributes: HashMap<String, serde_json::Value>,
+        dimension_names: Option<CoordVec<Option<String>>>,
+        extensions: HashMap<String, Extension>,
+    ) -> Result<Self, &'static str> {
+        let out = Self::new_unchecked(
+            zarr_format,
+            shape,
+            data_type,
+            chunk_grid,
+            chunk_key_encoding,
+            fill_value,
+            storage_transformers,
+            codecs,
+            attributes,
+            dimension_names,
+            extensions,
+        );
+        out.try_understand_extensions()?;
+        out.validate_dimensions()?;
+        Ok(out)
     }
 
     /// Ensures that all unknown extensions do not require understanding.
@@ -162,6 +194,10 @@ pub struct ArrayMetadataBuilder {
 }
 
 impl ArrayMetadataBuilder {
+    /// Prepare metadata for a basic array with a shape and data type.
+    ///
+    /// At a minimum, [ArrayMetadata::chunk_grid] should be called,
+    /// as the default behaviour is to have a single chunk for the entire array.
     pub fn new(shape: GridCoord, data_type: DataType) -> Self {
         Self {
             shape,
@@ -177,6 +213,11 @@ impl ArrayMetadataBuilder {
         }
     }
 
+    /// Set the chunk grid.
+    ///
+    /// By default, the entire array will be a single chunk.
+    ///
+    /// Fails if the chunk grid is incompatible with the array's dimensionality.
     pub fn chunk_grid<T: Into<ChunkGrid>>(mut self, chunk_grid: T) -> Result<Self, &'static str> {
         let cg = chunk_grid.into();
         self.union_ndim(&cg)?;
@@ -184,11 +225,24 @@ impl ArrayMetadataBuilder {
         Ok(self)
     }
 
+    /// Set the chunk key encoding.
+    ///
+    /// By default, uses the default chunk key encoding
+    /// (`c/`-prefixed, `/`-separated).
     pub fn chunk_key_encoding<T: Into<ChunkKeyEncoding>>(mut self, chunk_key_encoding: T) -> Self {
         self.chunk_key_encoding = Some(chunk_key_encoding.into());
         self
     }
 
+    /// Set the fill value.
+    ///
+    /// By default, uses the data type's default value, which is generally `false` or `0`.
+    ///
+    /// Fails if the value's JSON serialisation is not compatible
+    /// with the array's data type.
+    /// This means that types which have compatible JSON representations are interchangeable here:
+    /// for example, a f32 fill value can be given for a f64 array,
+    /// or a 2-length u8 array fill value can be given for a c128 array.
     pub fn fill_value<T: Serialize>(mut self, fill_value: T) -> Result<Self, &'static str> {
         let v = serde_json::to_value(fill_value).map_err(|_e| "Could not serialize fill value")?;
         self.data_type
@@ -199,10 +253,15 @@ impl ArrayMetadataBuilder {
         Ok(self)
     }
 
+    /// Mutable access to the array's storage transformers.
     pub fn storage_transformers_mut(&mut self) -> &mut Vec<StorageTransformer> {
         &mut self.storage_transformers
     }
 
+    /// Append a storage transformer to the list.
+    ///
+    /// N.B. this API is subject to change as there are no
+    /// storage transformers in the specification at time of writing.
     pub fn push_storage_transformer<T: Into<StorageTransformer>>(
         mut self,
         storage_transformer: T,
@@ -211,6 +270,12 @@ impl ArrayMetadataBuilder {
         self
     }
 
+    /// Set the array->bytes codec.
+    ///
+    /// By default, uses a little-[crate::codecs::ab::EndianCodec].
+    ///
+    /// Replaces an existing AB codec.
+    /// Fails if the dimensions are not compatible with the array's shape.
     pub fn ab_codec<T: Into<ABCodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
         let c = codec.into();
         self.union_ndim(&c)?;
@@ -218,6 +283,11 @@ impl ArrayMetadataBuilder {
         Ok(self)
     }
 
+    /// Append an array->array codec.
+    ///
+    /// This will be the last AA encoder, or first AA decoder.
+    ///
+    /// Fails if the dimensions are not compatible with the array's shape.
     pub fn push_aa_codec<T: Into<AACodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
         let c = codec.into();
         self.union_ndim(&c)?;
@@ -225,6 +295,9 @@ impl ArrayMetadataBuilder {
         Ok(self)
     }
 
+    /// Append a bytes->bytes codec.
+    ///
+    /// This will be the last BB encoder, or first BB decoder.
     pub fn push_bb_codec<T: Into<BBCodecType>>(mut self, codec: T) -> Self {
         let c = codec.into();
         // todo: check blosc type size
@@ -232,10 +305,14 @@ impl ArrayMetadataBuilder {
         self
     }
 
+    /// Mutable access to the array's arbitrary attributes.
     pub fn attributes_mut(&mut self) -> &mut HashMap<String, serde_json::Value> {
         &mut self.attributes
     }
 
+    /// Set the dimension names.
+    ///
+    /// Fails if the number of dimension names do not match the array's dimensionality.
     pub fn dimension_names(
         mut self,
         names: CoordVec<Option<String>>,
@@ -247,11 +324,14 @@ impl ArrayMetadataBuilder {
         Ok(self)
     }
 
+    /// Mutable access to the array's extensions.
     pub fn extensions_mut(&mut self) -> &mut HashMap<String, Extension> {
         &mut self.extensions
     }
 
+    /// Build the [ArrayMetadata].
     pub fn build(self) -> ArrayMetadata {
+        // todo: should this fail if there are must_understand extensions?
         let chunk_grid = self
             .chunk_grid
             .unwrap_or_else(|| ChunkGrid::from(self.shape.as_slice()));
@@ -260,7 +340,7 @@ impl ArrayMetadataBuilder {
             .fill_value
             .unwrap_or_else(|| self.data_type.default_fill_value());
 
-        ArrayMetadata::new(
+        ArrayMetadata::new_unchecked(
             ZARR_FORMAT,
             self.shape,
             self.data_type,

@@ -1,13 +1,19 @@
+use ndarray::{Array, ArrayD};
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Seek};
+use std::io::{BufWriter, Cursor, Read, Seek};
 use thiserror::Error;
 
-use crate::chunk_arr::{ChunkSpec, ChunkSpecConstructionError};
-use crate::codecs::CodecType;
-use crate::{ChunkCoord, MaybeNdim, Ndim};
+use crate::chunk_arr::{offset_shape_to_slice_info, ChunkIter};
+// use crate::chunk_arr::{ChunkSpec, ChunkSpecConstructionError};
+use crate::codecs::aa::AACodecType;
+use crate::codecs::bb::BBCodecType;
+use crate::codecs::{ArrayRepr, CodecChain};
+use crate::data_type::ReflectedType;
+use crate::{GridCoord, MaybeNdim, Ndim};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Seek, SeekFrom, Write};
-use thiserror::Error;
+use std::io::{SeekFrom, Write};
+
+use super::{ABCodec, ABCodecType};
 
 #[derive(Error, Debug)]
 #[error("Got coord with {coord_ndim} dimensions for array of dimension {array_ndim}")]
@@ -31,8 +37,8 @@ impl DimensionMismatch {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ShardingIndexedCodec {
-    pub chunk_shape: ChunkCoord,
-    pub codecs: Vec<CodecType>,
+    pub chunk_shape: GridCoord,
+    pub codecs: CodecChain,
 }
 
 impl Ndim for ShardingIndexedCodec {
@@ -42,27 +48,59 @@ impl Ndim for ShardingIndexedCodec {
 }
 
 impl ShardingIndexedCodec {
-    pub fn new<C: Into<ChunkCoord>>(chunk_shape: C) -> Self {
+    pub fn new<C: Into<GridCoord>>(chunk_shape: C) -> Self {
         Self {
             chunk_shape: chunk_shape.into(),
-            codecs: Vec::default(),
+            codecs: CodecChain::default(),
         }
     }
 
-    /// Ensure that all dimensioned metadata is consistent.
-    fn validate_dimensions(&self) -> Result<(), &'static str> {
-        // todo: how to make sure this is called after deserialisation?
-        for c in self.codecs.iter() {
-            self.union_ndim(c)?;
-        }
-
-        Ok(())
+    pub fn n_chunks(&self, shard_shape: &[u64]) -> Result<Vec<u64>, &'static str> {
+        self.chunk_shape
+            .iter()
+            .zip(shard_shape.iter())
+            .map(|(c, s)| {
+                if s % c != 0 {
+                    return Err("Shard shape does not match sub-chunks");
+                }
+                Ok(s / c)
+            })
+            .collect()
     }
 
-    pub fn add_codec(&mut self, codec: CodecType) -> Result<&mut Self, &'static str> {
-        self.union_ndim(&codec)?;
-        self.codecs.push(codec);
+    /// Set the array->bytes codec.
+    ///
+    /// By default, uses a little-[crate::codecs::ab::EndianCodec].
+    ///
+    /// Replaces an existing AB codec.
+    /// Fails if the dimensions are not compatible with the array's shape.
+    pub fn ab_codec<T: Into<ABCodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+        let c = codec.into();
+        self.union_ndim(&c)?;
+        self.codecs.replace_ab_codec(Some(c));
         Ok(self)
+    }
+
+    /// Append an array->array codec.
+    ///
+    /// This will be the last AA encoder, or first AA decoder.
+    ///
+    /// Fails if the dimensions are not compatible with the array's shape.
+    pub fn push_aa_codec<T: Into<AACodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+        let c = codec.into();
+        self.union_ndim(&c)?;
+        self.codecs.aa_codecs_mut().push(c);
+        Ok(self)
+    }
+
+    /// Append a bytes->bytes codec.
+    ///
+    /// This will be the last BB encoder, or first BB decoder.
+    pub fn push_bb_codec<T: Into<BBCodecType>>(mut self, codec: T) -> Self {
+        let c = codec.into();
+        // todo: check blosc type size
+        self.codecs.bb_codecs_mut().push(c);
+        self
     }
 }
 
@@ -90,56 +128,92 @@ impl From<ReadChunk> for Option<Vec<u8>> {
     }
 }
 
-pub struct Shard {
-    config: ShardingIndexedCodec,
-    chunk_spec: ChunkSpec,
-}
+impl ABCodec for ShardingIndexedCodec {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+        let mut bw = BufWriter::new(w);
+        let mut curs = Cursor::new(Vec::default());
 
-impl Shard {
-    pub fn new(config: ShardingIndexedCodec, chunk_spec: ChunkSpec) -> Self {
-        Self { config, chunk_spec }
+        let dec_shape: GridCoord = decoded.shape().iter().map(|s| *s as u64).collect();
+        let mut offset: u64 = 0;
+
+        let mut addrs = Vec::default();
+        for c_info in ChunkIter::new_strict(self.chunk_shape.clone(), dec_shape).unwrap() {
+            let sl = offset_shape_to_slice_info(&c_info.offset, &c_info.shape);
+            // todo: avoid this copy
+            let sub_arr = decoded.slice(sl).to_owned();
+            self.codecs.encode(sub_arr, &mut curs);
+            let nbytes = curs.position();
+            bw.write(&curs.get_ref()[..(nbytes as usize)])
+                .expect("Could not write sub-chunk");
+            addrs.push(ChunkAddress {
+                offset: offset.clone(),
+                nbytes: nbytes.clone(),
+            });
+            offset += nbytes;
+            curs.set_position(0);
+        }
+
+        for addr in addrs {
+            addr.write_to(&mut bw).expect("Could not write chunk addr");
+        }
+
+        bw.flush()
+            .expect("Could not write shard to underlying buffer");
     }
 
-    pub fn from_shard<R: Read + Seek>(
-        config: ShardingIndexedCodec,
-        r: &mut R,
-    ) -> Result<Self, ChunkSpecConstructionError> {
-        let chunk_spec = ChunkSpec::from_shard(r, config.chunk_shape.clone())?;
-        Ok(Self::new(config, chunk_spec))
-    }
+    fn decode<R: Read, T: ReflectedType>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+        let shape: Vec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
+        let mut arr = <T>::create_empty_array(decoded_repr.fill_value.clone(), shape.as_slice());
+        let mut buf = Vec::default();
+        r.read_to_end(&mut buf).expect("Could not read");
+        let mut curs = Cursor::new(buf);
+        let sh: GridCoord = shape.iter().map(|s| *s as u64).collect();
+        let cspec = ChunkSpec::from_shard(&mut curs, sh).expect("Could not construct chunk spec");
 
-    // pub fn read_chunk_content<R: Read + Seek>(
-    //     &self,
-    //     idx: &ChunkCoord,
-    //     r: &mut R,
-    // ) -> Result<ReadChunk, ChunkReadError> {
-    // let out = match self.chunk_spec.get_idx(idx)? {
-    //     Some(chunk_idx) => {
-    //         if chunk_idx.is_empty() {
-    //             ReadChunk::Empty
-    //         } else {
-    //             let encoded = chunk_idx.read_range(r)?;
-    //             let decoded = self.config.codecs.as_slice().decode(&encoded);
-    //             ReadChunk::Contents(decoded)
-    //         }
-    //     }
-    //     None => ReadChunk::OutOfBounds,
-    // };
-    // Ok(out)
-    // }
+        for c_info in ChunkIter::new_strict(self.chunk_shape.clone(), decoded_repr.shape)
+            .expect("Could not iterate shard chunks")
+        {
+            let addr = cspec.get_idx(&c_info.chunk_idx).unwrap().unwrap();
+            if addr.is_empty() {
+                continue;
+            }
+            let mut buf = vec![0; addr.nbytes as usize];
+            curs.seek(SeekFrom::Start(addr.offset))
+                .expect("Could not seek");
+            curs.read_exact(&mut buf).expect("Could not read sub-chunk");
+
+            let sub_arr = self.codecs.decode::<_, T>(
+                buf.as_slice(),
+                ArrayRepr {
+                    shape: c_info.shape.clone(),
+                    data_type: decoded_repr.data_type.clone(),
+                    fill_value: decoded_repr.fill_value.clone(),
+                },
+            );
+
+            let sl = offset_shape_to_slice_info(&c_info.offset, &c_info.shape);
+            let mut view = arr.slice_mut(sl);
+            view.assign(&sub_arr);
+        }
+        arr
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct ChunkIndex {
+pub struct ChunkAddress {
     // todo: replace with Option<usize>?
     pub offset: u64,
     pub nbytes: u64,
 }
 
 // todo: replace with Option<ChunkIndex>?
-impl ChunkIndex {
+impl ChunkAddress {
     pub fn is_empty(&self) -> bool {
         self.offset == u64::MAX && self.nbytes == u64::MAX
+    }
+
+    pub fn nbytes() -> usize {
+        std::mem::size_of::<u64>() + std::mem::size_of::<u64>()
     }
 
     pub fn empty() -> Self {
@@ -155,7 +229,7 @@ impl ChunkIndex {
         Ok(Self { offset, nbytes })
     }
 
-    pub fn write<W: Write>(&self, w: &mut W) -> Result<(), std::io::Error> {
+    pub fn write_to<W: Write>(&self, w: &mut W) -> Result<(), std::io::Error> {
         w.write_u64::<LittleEndian>(self.offset)?;
         w.write_u64::<LittleEndian>(self.nbytes)?;
         Ok(())
@@ -177,13 +251,13 @@ impl ChunkIndex {
     }
 }
 
-impl PartialOrd for ChunkIndex {
+impl PartialOrd for ChunkAddress {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ChunkIndex {
+impl Ord for ChunkAddress {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let cmp = self.offset.cmp(&other.offset);
         if cmp.is_eq() {
@@ -205,7 +279,7 @@ pub enum ChunkSpecError {
 }
 
 impl ChunkSpecError {
-    fn check_data(data_len: usize, shape: &ChunkCoord) -> Result<(), Self> {
+    fn check_data(data_len: usize, shape: &GridCoord) -> Result<(), Self> {
         if shape.is_empty() {
             return Err(Self::EmptyChunkShape);
         }
@@ -232,10 +306,7 @@ pub enum ChunkSpecConstructionError {
 }
 
 /// C order
-fn to_linear_idx(
-    coord: &ChunkCoord,
-    shape: &ChunkCoord,
-) -> Result<Option<usize>, DimensionMismatch> {
+fn to_linear_idx(coord: &GridCoord, shape: &GridCoord) -> Result<Option<usize>, DimensionMismatch> {
     DimensionMismatch::check_coords(coord.len(), shape.len())?;
 
     let mut total = 0;
@@ -253,52 +324,61 @@ fn to_linear_idx(
 #[derive(Error, Debug)]
 pub enum ChunkSpecModificationError {
     #[error("Index {coord:?} is out of bounds of shape {shape:?}")]
-    OutOfBounds {
-        coord: ChunkCoord,
-        shape: ChunkCoord,
-    },
+    OutOfBounds { coord: GridCoord, shape: GridCoord },
     #[error("Dimension mismatch")]
     DimensionMismatch(#[from] DimensionMismatch),
 }
 
 pub struct ChunkSpec {
-    chunk_idxs: Vec<ChunkIndex>,
-    shape: ChunkCoord,
+    chunk_idxs: Vec<ChunkAddress>,
+    shape: GridCoord,
 }
 
 impl ChunkSpec {
     /// Checks that all axes have nonzero length, and that the given shape matches the data length.
-    pub fn new(chunk_idxs: Vec<ChunkIndex>, shape: ChunkCoord) -> Result<Self, ChunkSpecError> {
+    pub fn new(chunk_idxs: Vec<ChunkAddress>, shape: GridCoord) -> Result<Self, ChunkSpecError> {
         ChunkSpecError::check_data(chunk_idxs.len(), &shape)?;
         Ok(Self::new_unchecked(chunk_idxs, shape))
     }
 
+    /// From a [Seek]able [Read]er representing a whole shard.
     pub fn from_shard<R: Read + Seek>(
         r: &mut R,
-        shape: ChunkCoord,
+        shape: GridCoord,
     ) -> Result<Self, ChunkSpecConstructionError> {
-        let offset: i64 = shape.iter().fold(-1, |acc, x| acc * *x as i64);
-        r.seek(SeekFrom::End(offset))?;
-        Self::from_reader(r, shape)
+        let prod = shape.iter().fold(1, |a, b| a * b);
+        if prod == 0 {
+            Ok(Self::new_unchecked(vec![], shape))
+        } else {
+            let offset = -(prod as i64) * std::mem::size_of::<ChunkAddress>() as i64;
+            r.seek(SeekFrom::End(offset))?;
+            Self::from_reader(r, shape)
+        }
     }
 
-    pub fn from_reader<R: Read + Seek>(
+    /// From a [Read]er representing the footer at the end of a shard.
+    pub fn from_reader<R: Read>(
         r: &mut R,
-        shape: ChunkCoord,
+        shape: GridCoord,
     ) -> Result<Self, ChunkSpecConstructionError> {
-        let len: usize = shape.iter().fold(1, |acc, x| acc * *x as usize);
-        let mut data = Vec::with_capacity(len);
-        for _ in 0..len {
-            let c = ChunkIndex::from_reader(r)?;
-            data.push(c);
+        let n_c_addrs: usize = shape.iter().fold(1, |acc, x| acc * *x as usize);
+        let buf_len = n_c_addrs * std::mem::size_of::<ChunkAddress>();
+        let mut buf = vec![u8::MAX; buf_len];
+        r.read_exact(&mut buf)?;
+
+        let mut c_idxs = Vec::with_capacity(n_c_addrs);
+        let mut curs = Cursor::new(buf);
+        for _ in 0..n_c_addrs {
+            let c = ChunkAddress::from_reader(&mut curs)?;
+            c_idxs.push(c);
         }
 
-        Self::new(data, shape).map_err(|e| e.into())
+        Self::new(c_idxs, shape).map_err(|e| e.into())
     }
 
-    pub fn write<W: Write>(&self, w: &mut W) -> Result<(), std::io::Error> {
+    pub fn write_to<W: Write>(&self, w: &mut W) -> Result<(), std::io::Error> {
         for c in self.chunk_idxs.iter() {
-            c.write(w)?;
+            c.write_to(w)?;
         }
         Ok(())
     }
@@ -309,19 +389,19 @@ impl ChunkSpec {
     }
 
     /// Skips checks.
-    pub fn new_unchecked(chunk_idxs: Vec<ChunkIndex>, shape: ChunkCoord) -> Self {
+    pub fn new_unchecked(chunk_idxs: Vec<ChunkAddress>, shape: GridCoord) -> Self {
         Self { chunk_idxs, shape }
     }
 
-    pub fn get_idx(&self, idx: &ChunkCoord) -> Result<Option<&ChunkIndex>, DimensionMismatch> {
+    pub fn get_idx(&self, idx: &GridCoord) -> Result<Option<&ChunkAddress>, DimensionMismatch> {
         Ok(to_linear_idx(idx, &self.shape)?.and_then(|t| self.chunk_idxs.get(t)))
     }
 
     pub fn set_idx(
         &mut self,
-        idx: &ChunkCoord,
-        chunk_idx: ChunkIndex,
-    ) -> Result<ChunkIndex, ChunkSpecModificationError> {
+        idx: &GridCoord,
+        chunk_idx: ChunkAddress,
+    ) -> Result<ChunkAddress, ChunkSpecModificationError> {
         let lin_idx = to_linear_idx(idx, &self.shape)?.ok_or_else(|| {
             ChunkSpecModificationError::OutOfBounds {
                 coord: idx.clone(),

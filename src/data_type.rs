@@ -224,6 +224,7 @@ impl DataType {
                 }
             },
             DataType::Float(s) => match s {
+                // todo: check for NaN, +-Inf
                 FloatSize::b32 => {
                     serde_json::from_value::<f32>(v)?;
                 }
@@ -232,6 +233,7 @@ impl DataType {
                 }
             },
             DataType::Complex(s) => match s {
+                // todo: check for NaN, +-Inf
                 ComplexSize::b64 => {
                     serde_json::from_value::<c64>(v)?;
                 }
@@ -419,6 +421,12 @@ pub trait ReflectedType:
         }
 
         ArrayD::from_shape_vec(shape.to_vec(), data).unwrap()
+    }
+
+    // todo: take ArrayRepr directly?
+    fn create_empty_array(fill_value: serde_json::Value, shape: &[usize]) -> ArrayD<Self> {
+        let fill = serde_json::from_value(fill_value).expect("Could not deser value");
+        ArrayD::from_elem(shape, fill)
     }
 
     // fn create_data_chunk(grid_position: &GridCoord, num_el: u32) -> VecDataChunk<Self> {

@@ -1,9 +1,11 @@
-use ndarray::ArrayD;
+use ndarray::{Array, ArrayD};
 use serde::{Deserialize, Serialize};
 
 use crate::{data_type::ReflectedType, MaybeNdim};
 mod transpose;
 pub use transpose::TransposeCodec;
+
+use super::ArrayRepr;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "lowercase", tag = "codec", content = "configuration")]
@@ -29,7 +31,8 @@ pub trait AACodec {
 
     fn decode<T: ReflectedType>(&self, encoded: ArrayD<T>) -> ArrayD<T>;
 
-    fn compute_encoded_shape(&self, decoded_shape: &[usize]) -> Vec<usize>;
+    // todo: should include shape, endianness, order?, dtype, fill value
+    fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr;
 }
 
 impl AACodec for &[AACodecType] {
@@ -49,18 +52,9 @@ impl AACodec for &[AACodecType] {
         e
     }
 
-    fn compute_encoded_shape(&self, decoded_shape: &[usize]) -> Vec<usize> {
-        let mut it = self.iter();
-        let mut out;
-        if let Some(c) = it.next() {
-            out = c.compute_encoded_shape(decoded_shape);
-        } else {
-            out = decoded_shape.to_vec();
-        }
-        for c in it {
-            out = c.compute_encoded_shape(&out);
-        }
-        out
+    fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr {
+        self.iter()
+            .fold(decoded_repr, |d, c| c.compute_encoded_representation(d))
     }
 }
 
