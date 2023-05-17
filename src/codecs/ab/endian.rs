@@ -58,8 +58,10 @@ impl ABCodec for EndianCodec {
         T::write_array_to(decoded, w, self.endian).unwrap();
     }
 
-    fn decode<R: Read, T: ReflectedType>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
-        // todo: check for mismatch between T::ZARR_TYPE and decoded_repr.data_type
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+        if T::ZARR_TYPE != decoded_repr.data_type {
+            panic!("Decoded array is not of the reflected type");
+        }
         let shape: CoordVec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
         T::read_array_from(r, self.endian, shape.as_slice())
     }

@@ -1,4 +1,4 @@
-use ndarray::{ArrayD};
+use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Cursor, Read, Seek};
 use thiserror::Error;
@@ -161,7 +161,7 @@ impl ABCodec for ShardingIndexedCodec {
             .expect("Could not write shard to underlying buffer");
     }
 
-    fn decode<R: Read, T: ReflectedType>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
         let shape: Vec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
         let mut arr = <T>::create_empty_array(decoded_repr.fill_value.clone(), shape.as_slice());
         let mut buf = Vec::default();
@@ -182,7 +182,7 @@ impl ABCodec for ShardingIndexedCodec {
                 .expect("Could not seek");
             curs.read_exact(&mut buf).expect("Could not read sub-chunk");
 
-            let sub_arr = self.codecs.decode::<_, T>(
+            let sub_arr = self.codecs.decode::<T, _>(
                 buf.as_slice(),
                 ArrayRepr {
                     shape: c_info.shape.clone(),

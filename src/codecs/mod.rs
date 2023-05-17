@@ -155,7 +155,7 @@ impl ABCodec for CodecChain {
         self.ab_codec().encode(arr.into(), bb_w);
     }
 
-    fn decode<R: Read, T: ReflectedType>(
+    fn decode<T: ReflectedType, R: Read>(
         &self,
         r: R,
         decoded_repr: ArrayRepr,
@@ -275,7 +275,7 @@ mod tests {
             fill_value: serde_json::to_value(0.0).unwrap(),
         };
 
-        let arr2 = chain.decode::<_, f64>(buf.as_slice(), repr);
+        let arr2 = chain.decode::<f64, _>(buf.as_slice(), repr);
 
         assert_eq!(&arr, &arr2);
     }
@@ -309,7 +309,7 @@ mod tests {
             fill_value: serde_json::to_value(0.0).unwrap(),
         };
 
-        let arr2 = chain.decode::<_, f64>(buf.as_slice(), repr);
+        let arr2 = chain.decode::<f64, _>(buf.as_slice(), repr);
 
         assert_eq!(&arr, &arr2);
     }
