@@ -262,13 +262,13 @@ impl ArrayMetadataBuilder {
     ///
     /// N.B. this API is subject to change as there are no specified
     /// storage transformers at time of writing.
-    pub fn push_storage_transformer<T: Into<StorageTransformer>>(
-        mut self,
-        storage_transformer: T,
-    ) -> Self {
-        self.storage_transformers.push(storage_transformer.into());
-        self
-    }
+    // pub fn push_storage_transformer<T: Into<StorageTransformer>>(
+    //     mut self,
+    //     storage_transformer: T,
+    // ) -> Self {
+    //     self.storage_transformers.push(storage_transformer.into());
+    //     self
+    // }
 
     /// Set the array->bytes codec.
     ///
