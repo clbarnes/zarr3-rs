@@ -201,7 +201,6 @@ impl ABCodec for ShardingIndexedCodec {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ChunkAddress {
-    // todo: replace with Option<usize>?
     pub offset: u64,
     pub nbytes: u64,
 }

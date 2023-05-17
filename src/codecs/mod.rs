@@ -23,6 +23,9 @@ use crate::{
 #[derive(Clone, PartialEq, Debug)]
 pub struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,
+    // this is closer to the serialized form.
+    // However, it necessitates extra clones in ab_codec function.
+    // May be better to just reify it early and not round-trip?
     pub ab_codec: Option<ABCodecType>,
     pub bb_codecs: Vec<BBCodecType>,
 }
@@ -152,7 +155,7 @@ impl ABCodec for CodecChain {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
         let bb_w = self.bb_codecs.as_slice().encoder(w);
         let arr = self.aa_codecs.as_slice().encode(decoded.into());
-        self.ab_codec().encode(arr.into(), bb_w);
+        self.ab_codec().encode::<T, _>(arr.into(), bb_w);
     }
 
     fn decode<T: ReflectedType, R: Read>(
@@ -165,7 +168,7 @@ impl ABCodec for CodecChain {
             .as_slice()
             .compute_encoded_representation(decoded_repr);
         let bb_r = self.bb_codecs.as_slice().decoder(r);
-        let arr = self.ab_codec().decode(bb_r, ab_repr);
+        let arr = self.ab_codec().decode::<T, _>(bb_r, ab_repr);
         self.aa_codecs.as_slice().decode(arr)
     }
 }

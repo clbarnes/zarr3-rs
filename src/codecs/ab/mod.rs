@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::{data_type::ReflectedType, variant_from_data, MaybeNdim};
+use crate::{data_type::ReflectedType, MaybeNdim, variant_from_data};
 
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,8 @@ use sharding_indexed::ShardingIndexedCodec;
 
 use super::ArrayRepr;
 
-#[enum_delegate::register]
+// enum_delegate doesn't work here because of type annotations?
+// #[enum_delegate::register]
 pub trait ABCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W);
 
@@ -23,20 +24,40 @@ pub trait ABCodec {
 
 impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
-        ABCodec::encode(self, decoded, w)
+        (**self).encode(decoded, w)
+        // ABCodec::encode::<T, W>(self, decoded, w)
     }
 
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
-        ABCodec::decode(self, r, decoded_repr)
+        (**self).decode(r, decoded_repr)
+        // ABCodec::decode::<T, R>(self, r, decoded_repr)
     }
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "snake_case", tag = "codec", content = "configuration")]
-#[enum_delegate::implement(ABCodec)]
+// #[enum_delegate::implement(ABCodec)]
 pub enum ABCodecType {
     Endian(EndianCodec),
+    // box is necessary as sharding codec contains codecs,
+    // so it's a recursive enum of potentially infinite size
     ShardingIndexed(Box<ShardingIndexedCodec>),
+}
+
+impl ABCodec for ABCodecType {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+        match self {
+            Self::Endian(c) => c.encode(decoded, w),
+            Self::ShardingIndexed(c) => c.encode(decoded, w),
+        }
+    }
+
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+        match self {
+            Self::Endian(c) => c.decode(r, decoded_repr),
+            Self::ShardingIndexed(c) => c.decode(r, decoded_repr),
+        }
+    }
 }
 
 impl MaybeNdim for ABCodecType {
@@ -48,12 +69,16 @@ impl MaybeNdim for ABCodecType {
     }
 }
 
-// variant_from_data!(ABCodecType, Endian, EndianCodec);
-
 impl Default for ABCodecType {
     fn default() -> Self {
         Self::Endian(EndianCodec::default())
     }
 }
 
-// variant_from_data!(ABCodecType, Endian, EndianCodec);
+variant_from_data!(ABCodecType, Endian, EndianCodec);
+
+impl From<ShardingIndexedCodec> for ABCodecType {
+    fn from(c: ShardingIndexedCodec) -> Self {
+        Self::ShardingIndexed(Box::new(c))
+    }
+}

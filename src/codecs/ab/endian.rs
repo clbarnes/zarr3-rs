@@ -40,16 +40,20 @@ pub struct EndianCodec {
 }
 
 impl EndianCodec {
+    pub fn new(endian: Endian) -> Self {
+        Self {endian}
+    }
+
     pub fn new_big() -> Self {
-        Self {
-            endian: Endian::Big,
-        }
+        Self::new(Endian::Big)
     }
 
     pub fn new_little() -> Self {
-        Self {
-            endian: Endian::Little,
-        }
+        Self::new(Endian::Little)
+    }
+
+    pub fn new_native() -> Self {
+        Self::new(NATIVE_ENDIAN)
     }
 }
 
