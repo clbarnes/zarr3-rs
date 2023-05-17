@@ -1,5 +1,4 @@
-use crate::{codecs::ArrayRepr, CoordVec, MaybeNdim};
-use ndarray::ArrayD;
+use crate::{codecs::ArrayRepr, ArcArrayD, CoordVec, MaybeNdim};
 use serde::{Deserialize, Serialize};
 
 use std::io::{Read, Write};
@@ -41,7 +40,7 @@ pub struct EndianCodec {
 
 impl EndianCodec {
     pub fn new(endian: Endian) -> Self {
-        Self {endian}
+        Self { endian }
     }
 
     pub fn new_big() -> Self {
@@ -58,11 +57,11 @@ impl EndianCodec {
 }
 
 impl ABCodec for EndianCodec {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         T::write_array_to(decoded, w, self.endian).unwrap();
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
         if T::ZARR_TYPE != decoded_repr.data_type {
             panic!("Decoded array is not of the reflected type");
         }

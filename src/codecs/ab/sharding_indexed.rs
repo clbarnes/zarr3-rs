@@ -1,4 +1,3 @@
-use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Cursor, Read, Seek};
 use thiserror::Error;
@@ -9,7 +8,7 @@ use crate::codecs::aa::AACodecType;
 use crate::codecs::bb::BBCodecType;
 use crate::codecs::{ArrayRepr, CodecChain};
 use crate::data_type::ReflectedType;
-use crate::{GridCoord, MaybeNdim, Ndim};
+use crate::{ArcArrayD, GridCoord, MaybeNdim, Ndim};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{SeekFrom, Write};
 
@@ -129,7 +128,7 @@ impl From<ReadChunk> for Option<Vec<u8>> {
 }
 
 impl ABCodec for ShardingIndexedCodec {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         let mut bw = BufWriter::new(w);
         let mut curs = Cursor::new(Vec::default());
 
@@ -139,8 +138,7 @@ impl ABCodec for ShardingIndexedCodec {
         let mut addrs = Vec::default();
         for c_info in ChunkIter::new_strict(self.chunk_shape.clone(), dec_shape).unwrap() {
             let sl = offset_shape_to_slice_info(&c_info.offset, &c_info.shape);
-            // todo: avoid this copy
-            let sub_arr = decoded.slice(sl).to_owned();
+            let sub_arr = decoded.slice(sl).to_shared();
             self.codecs.encode(sub_arr, &mut curs);
             let nbytes = curs.position();
             bw.write(&curs.get_ref()[..(nbytes as usize)])
@@ -161,7 +159,7 @@ impl ABCodec for ShardingIndexedCodec {
             .expect("Could not write shard to underlying buffer");
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
         let shape: Vec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
         let mut arr = <T>::create_empty_array(decoded_repr.fill_value.clone(), shape.as_slice());
         let mut buf = Vec::default();

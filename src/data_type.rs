@@ -6,11 +6,10 @@ use std::{
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
 
-use ndarray::ArrayD;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
 
-use crate::codecs::ab::endian::Endian;
+use crate::{codecs::ab::endian::Endian, ArcArrayD};
 
 pub trait NBytes {
     fn nbytes(&self) -> usize;
@@ -394,7 +393,7 @@ pub trait ReflectedType:
 
     // todo: replace array reading/writing with these
     // use bufreader & bufwriter, read however many bytes we need for a single item, use std (to|from)_[lb]e_bytes
-    fn write_array_to<W: Write>(array: ArrayD<Self>, w: W, endian: Endian) -> io::Result<()> {
+    fn write_array_to<W: Write>(array: ArcArrayD<Self>, w: W, endian: Endian) -> io::Result<()> {
         let mut bw = BufWriter::new(w);
         let mut buf = vec![0u8; Self::ZARR_TYPE.nbytes()];
         let encoder = Self::encoder(endian);
@@ -406,7 +405,7 @@ pub trait ReflectedType:
         bw.flush()
     }
 
-    fn read_array_from<R: Read>(r: R, endian: Endian, shape: &[usize]) -> ArrayD<Self> {
+    fn read_array_from<R: Read>(r: R, endian: Endian, shape: &[usize]) -> ArcArrayD<Self> {
         let mut br = BufReader::new(r);
         let mut buf = vec![0u8; Self::ZARR_TYPE.nbytes()];
         let decoder = Self::decoder(endian);
@@ -420,13 +419,13 @@ pub trait ReflectedType:
             data.push(decoder(buf.as_mut()));
         }
 
-        ArrayD::from_shape_vec(shape.to_vec(), data).unwrap()
+        ArcArrayD::from_shape_vec(shape.to_vec(), data).unwrap()
     }
 
     // todo: take ArrayRepr directly?
-    fn create_empty_array(fill_value: serde_json::Value, shape: &[usize]) -> ArrayD<Self> {
+    fn create_empty_array(fill_value: serde_json::Value, shape: &[usize]) -> ArcArrayD<Self> {
         let fill = serde_json::from_value(fill_value).expect("Could not deser value");
-        ArrayD::from_elem(shape, fill)
+        ArcArrayD::from_elem(shape, fill)
     }
 
     // fn create_data_chunk(grid_position: &GridCoord, num_el: u32) -> VecDataChunk<Self> {

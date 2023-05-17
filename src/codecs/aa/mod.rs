@@ -1,7 +1,6 @@
-use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 
-use crate::{data_type::ReflectedType, MaybeNdim};
+use crate::{data_type::ReflectedType, ArcArrayD, MaybeNdim};
 mod transpose;
 pub use transpose::TransposeCodec;
 
@@ -27,16 +26,16 @@ impl MaybeNdim for AACodecType {
 // todo: a CowArray would probably reduce copies
 #[enum_delegate::register]
 pub trait AACodec {
-    fn encode<T: ReflectedType>(&self, decoded: ArrayD<T>) -> ArrayD<T>;
+    fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> ArcArrayD<T>;
 
-    fn decode<T: ReflectedType>(&self, encoded: ArrayD<T>) -> ArrayD<T>;
+    fn decode<T: ReflectedType>(&self, encoded: ArcArrayD<T>) -> ArcArrayD<T>;
 
     // todo: should include shape, endianness, order?, dtype, fill value
     fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr;
 }
 
 impl AACodec for &[AACodecType] {
-    fn encode<T: ReflectedType>(&self, decoded: ArrayD<T>) -> ArrayD<T> {
+    fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> ArcArrayD<T> {
         let mut d = decoded;
         for c in self.iter() {
             d = c.encode(d);
@@ -44,7 +43,7 @@ impl AACodec for &[AACodecType] {
         d
     }
 
-    fn decode<T: ReflectedType>(&self, encoded: ArrayD<T>) -> ArrayD<T> {
+    fn decode<T: ReflectedType>(&self, encoded: ArcArrayD<T>) -> ArcArrayD<T> {
         let mut e = encoded;
         for c in self.iter().rev() {
             e = c.decode(e);

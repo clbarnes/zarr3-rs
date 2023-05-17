@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{codecs::ArrayRepr, data_type::ReflectedType, CoordVec, MaybeNdim};
+use crate::{codecs::ArrayRepr, data_type::ReflectedType, ArcArrayD, CoordVec, MaybeNdim};
 
 use super::AACodec;
 
@@ -112,7 +112,7 @@ impl Default for TransposeCodec {
 }
 
 impl AACodec for TransposeCodec {
-    fn encode<T: ReflectedType>(&self, decoded: ndarray::ArrayD<T>) -> ndarray::ArrayD<T> {
+    fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> ArcArrayD<T> {
         match &self.order {
             Order::C => decoded,
             Order::F => decoded.reversed_axes(),
@@ -120,7 +120,7 @@ impl AACodec for TransposeCodec {
         }
     }
 
-    fn decode<T: ReflectedType>(&self, encoded: ndarray::ArrayD<T>) -> ndarray::ArrayD<T> {
+    fn decode<T: ReflectedType>(&self, encoded: ArcArrayD<T>) -> ArcArrayD<T> {
         match &self.order {
             Order::C => encoded,
             Order::F => encoded.reversed_axes(),
@@ -167,9 +167,9 @@ impl MaybeNdim for TransposeCodec {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ndarray::ArrayD;
     use serde_json;
     use smallvec::smallvec;
+    use ArcArrayD;
 
     const SHAPE: [usize; 3] = [3, 4, 5];
 
@@ -183,8 +183,8 @@ mod test {
         }
     }
 
-    fn make_arr() -> ArrayD<u8> {
-        ArrayD::from_shape_vec(SHAPE.to_vec(), (0..60).collect()).unwrap()
+    fn make_arr() -> ArcArrayD<u8> {
+        ArcArrayD::from_shape_vec(SHAPE.to_vec(), (0..60).collect()).unwrap()
     }
 
     #[test]

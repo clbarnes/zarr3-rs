@@ -260,8 +260,8 @@ impl ArrayMetadataBuilder {
 
     /// Append a storage transformer to the list.
     ///
-    /// N.B. this API is subject to change as there are no
-    /// storage transformers in the specification at time of writing.
+    /// N.B. this API is subject to change as there are no specified
+    /// storage transformers at time of writing.
     pub fn push_storage_transformer<T: Into<StorageTransformer>>(
         mut self,
         storage_transformer: T,

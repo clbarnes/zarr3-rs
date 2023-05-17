@@ -1,11 +1,8 @@
 use std::io::{Read, Write};
 
-use crate::{data_type::ReflectedType, MaybeNdim, variant_from_data};
+use crate::{data_type::ReflectedType, variant_from_data, ArcArrayD, MaybeNdim};
 
-use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
-// pub mod sharding_indexed;
-// use sharding_indexed::ShardingIndexedCodec;
 
 pub mod endian;
 pub mod sharding_indexed;
@@ -17,18 +14,18 @@ use super::ArrayRepr;
 // enum_delegate doesn't work here because of type annotations?
 // #[enum_delegate::register]
 pub trait ABCodec {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W);
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W);
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T>;
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T>;
 }
 
 impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         (**self).encode(decoded, w)
         // ABCodec::encode::<T, W>(self, decoded, w)
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
         (**self).decode(r, decoded_repr)
         // ABCodec::decode::<T, R>(self, r, decoded_repr)
     }
@@ -45,14 +42,14 @@ pub enum ABCodecType {
 }
 
 impl ABCodec for ABCodecType {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         match self {
             Self::Endian(c) => c.encode(decoded, w),
             Self::ShardingIndexed(c) => c.encode(decoded, w),
         }
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
         match self {
             Self::Endian(c) => c.decode(r, decoded_repr),
             Self::ShardingIndexed(c) => c.decode(r, decoded_repr),

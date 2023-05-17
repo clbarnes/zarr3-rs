@@ -1,3 +1,4 @@
+use ndarray::{ArcArray, IxDyn};
 use smallvec::SmallVec;
 
 mod chunk_arr;
@@ -12,6 +13,7 @@ pub const ZARR_FORMAT: usize = 3;
 
 pub type CoordVec<T> = SmallVec<[T; COORD_SMALLVEC_SIZE]>;
 pub type GridCoord = CoordVec<u64>;
+pub type ArcArrayD<T> = ArcArray<T, IxDyn>;
 
 #[enum_delegate::register]
 pub trait Ndim {

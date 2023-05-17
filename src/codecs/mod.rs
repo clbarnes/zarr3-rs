@@ -3,7 +3,6 @@ use std::{
     io::{Read, Write},
 };
 
-use ndarray::ArrayD;
 use serde::{de, ser::SerializeSeq, Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -17,7 +16,7 @@ use bb::{BBCodec, BBCodecType};
 
 use crate::{
     data_type::{DataType, ReflectedType},
-    GridCoord, MaybeNdim,
+    ArcArrayD, GridCoord, MaybeNdim,
 };
 
 #[derive(Clone, PartialEq, Debug)]
@@ -152,17 +151,13 @@ impl<'de> Deserialize<'de> for CodecChain {
 }
 
 impl ABCodec for CodecChain {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArrayD<T>, w: W) {
+    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         let bb_w = self.bb_codecs.as_slice().encoder(w);
         let arr = self.aa_codecs.as_slice().encode(decoded.into());
         self.ab_codec().encode::<T, _>(arr.into(), bb_w);
     }
 
-    fn decode<T: ReflectedType, R: Read>(
-        &self,
-        r: R,
-        decoded_repr: ArrayRepr,
-    ) -> ndarray::ArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
         let ab_repr = self
             .aa_codecs
             .as_slice()
@@ -239,7 +234,9 @@ impl ArrayRepr {
     ) -> Result<Self, &'static str> {
         let fill = serde_json::to_value(fill_value).map_err(|_| "Could not serialize value")?;
         let s = shape.iter().cloned().collect();
-        data_type.validate_json_value(&fill);
+        data_type
+            .validate_json_value(&fill)
+            .map_err(|_| "Invalid JSON value")?;
         let repr = ArrayRepr {
             shape: s,
             data_type,
@@ -254,13 +251,14 @@ mod tests {
     use crate::codecs::ab::endian::EndianCodec;
     use crate::codecs::bb::gzip_codec::GzipCodec;
     use crate::data_type::FloatSize;
+    use crate::ArcArrayD;
 
     use super::*;
 
     const SHAPE: [usize; 3] = [3, 4, 5];
 
-    fn make_arr() -> ArrayD<f64> {
-        ArrayD::from_shape_vec(SHAPE.to_vec(), (0..60).map(|v| v as f64).collect()).unwrap()
+    fn make_arr() -> ArcArrayD<f64> {
+        ArcArrayD::from_shape_vec(SHAPE.to_vec(), (0..60).map(|v| v as f64).collect()).unwrap()
     }
 
     #[test]
