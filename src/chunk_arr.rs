@@ -53,6 +53,7 @@ impl Iterator for CIter {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChunkIterOutput {
     pub chunk_idx: GridCoord,
     pub offset: GridCoord,
@@ -117,11 +118,20 @@ impl ChunkIter {
             .zip(self.chunk_shape.iter())
             .map(|(i, cs)| i * cs)
             .collect();
+
         let shape = offset
             .iter()
             .zip(self.chunk_shape.iter())
             .zip(self.arr_shape.iter())
-            .map(|((o, c_s), a_s)| (o + c_s).min(*a_s))
+            .map(
+                |((o, c_s), a_s)| {
+                    if o + c_s > *a_s {
+                        a_s - o
+                    } else {
+                        *c_s
+                    }
+                },
+            )
             .collect();
 
         ChunkIterOutput {
@@ -163,6 +173,49 @@ mod tests {
             smallvec![1, 0],
             smallvec![1, 1],
             smallvec![1, 2],
+        ];
+        assert_eq!(v, expected)
+    }
+
+    #[test]
+    fn chunk_iter() {
+        let c_shape = smallvec![2, 3];
+        let a_shape = smallvec![6, 6];
+        let v: Vec<_> = ChunkIter::new_strict(c_shape.clone(), a_shape.clone())
+            .unwrap()
+            .collect();
+
+        let expected: Vec<ChunkIterOutput> = vec![
+            ChunkIterOutput {
+                chunk_idx: smallvec![0, 0],
+                offset: smallvec![0, 0],
+                shape: smallvec![2, 3],
+            },
+            ChunkIterOutput {
+                chunk_idx: smallvec![0, 1],
+                offset: smallvec![0, 3],
+                shape: smallvec![2, 3],
+            },
+            ChunkIterOutput {
+                chunk_idx: smallvec![1, 0],
+                offset: smallvec![2, 0],
+                shape: smallvec![2, 3],
+            },
+            ChunkIterOutput {
+                chunk_idx: smallvec![1, 1],
+                offset: smallvec![2, 3],
+                shape: smallvec![2, 3],
+            },
+            ChunkIterOutput {
+                chunk_idx: smallvec![2, 0],
+                offset: smallvec![4, 0],
+                shape: smallvec![2, 3],
+            },
+            ChunkIterOutput {
+                chunk_idx: smallvec![2, 1],
+                offset: smallvec![4, 3],
+                shape: smallvec![2, 3],
+            },
         ];
         assert_eq!(v, expected)
     }

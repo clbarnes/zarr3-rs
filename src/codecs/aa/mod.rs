@@ -23,14 +23,13 @@ impl MaybeNdim for AACodecType {
 
 // todo: methods should be able to change data type
 // todo: better with GATs, somehow?
-// todo: a CowArray would probably reduce copies
+// todo: generic array type to minimise copies? may need different input and output types
 #[enum_delegate::register]
 pub trait AACodec {
     fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> ArcArrayD<T>;
 
     fn decode<T: ReflectedType>(&self, encoded: ArcArrayD<T>) -> ArcArrayD<T>;
 
-    // todo: should include shape, endianness, order?, dtype, fill value
     fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr;
 }
 

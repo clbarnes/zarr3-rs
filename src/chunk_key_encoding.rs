@@ -1,12 +1,28 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
+use smallvec::smallvec;
 
-use crate::GridCoord;
+use crate::store::KEY_SEP;
+use crate::{store::NodeKey, CoordVec};
 
 #[enum_delegate::register]
 pub trait ChunkKeyEncoder {
-    fn encode(&self, coord: GridCoord) -> String;
+    fn components(&self, coord: &[u64]) -> CoordVec<String>;
+
+    // probably unnecessary
+    fn encode(&self, coord: &[u64]) -> String {
+        let components = self.components(coord);
+        components.join(KEY_SEP)
+    }
+
+    fn chunk_key(&self, node: &NodeKey, coord: &[u64]) -> NodeKey {
+        let mut n = node.clone();
+        for c in self.components(coord) {
+            n.push_unchecked(&c);
+        }
+        n
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -41,16 +57,25 @@ pub struct DefaultChunkKeyEncoding {
 }
 
 impl ChunkKeyEncoder for DefaultChunkKeyEncoding {
-    fn encode(&self, coord: GridCoord) -> String {
-        if coord.is_empty() {
-            panic!("No coord given");
+    fn components(&self, coord: &[u64]) -> CoordVec<String> {
+        let mut out = CoordVec::default();
+        match self.separator {
+            Separator::Slash => {
+                out.push("c".to_owned());
+                for n in coord.iter() {
+                    out.push(n.to_string());
+                }
+            }
+            Separator::Dot => {
+                let sep = self.separator.to_string();
+                let s = coord
+                    .iter()
+                    .map(|n| n.to_string())
+                    .fold(String::from("c"), |a, b| a + &sep + &b);
+                out.push(s);
+            }
         }
-        let sep = self.separator.to_string();
-        let s = String::from("c");
-        coord
-            .iter()
-            .map(|n| n.to_string())
-            .fold(s, |a, b| a + &sep + &b)
+        out
     }
 }
 
@@ -69,13 +94,28 @@ pub struct V2ChunkKeyEncoding {
 }
 
 impl ChunkKeyEncoder for V2ChunkKeyEncoding {
-    fn encode(&self, coord: GridCoord) -> String {
-        let sep = self.separator.to_string();
-        coord
-            .iter()
-            .map(|n| n.to_string())
-            .reduce(|a, b| a + &sep + &b)
-            .expect("No coord given")
+    fn components(&self, coord: &[u64]) -> CoordVec<String> {
+        if coord.is_empty() {
+            return smallvec!["0".to_owned()];
+        }
+        let mut out = CoordVec::default();
+        match self.separator {
+            Separator::Slash => {
+                for n in coord.iter() {
+                    out.push(n.to_string());
+                }
+            }
+            Separator::Dot => {
+                let sep = self.separator.to_string();
+                let s = coord
+                    .iter()
+                    .map(|n| n.to_string())
+                    .reduce(|a, b| a + &sep + &b)
+                    .unwrap();
+                out.push(s);
+            }
+        }
+        out
     }
 }
 
@@ -107,7 +147,6 @@ impl Default for ChunkKeyEncoding {
 mod tests {
     use super::*;
     use serde_json;
-    use smallvec::smallvec;
 
     #[test]
     fn roundtrip_chunk_key_encoding() {
@@ -154,14 +193,14 @@ mod tests {
     #[test]
     fn default_chunk_key_encoding() {
         let cke = ChunkKeyEncoding::Default(DefaultChunkKeyEncoding::default());
-        let s = cke.encode(smallvec![1, 2, 3]);
+        let s = cke.encode(&[1, 2, 3]);
         assert_eq!(&s, "c/1/2/3");
     }
 
     #[test]
     fn v2_chunk_key_encoding() {
         let cke = ChunkKeyEncoding::V2(V2ChunkKeyEncoding::default());
-        let s = cke.encode(smallvec![1, 2, 3]);
+        let s = cke.encode(&[1, 2, 3]);
         assert_eq!(&s, "1.2.3");
     }
 }

@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::variant_from_data;
 
+pub type JsonObject = HashMap<String, serde_json::Value>;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GroupMetadata {
     zarr_format: usize,
     #[serde(default = "HashMap::default")]
-    attributes: HashMap<String, serde_json::Value>,
+    attributes: JsonObject,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

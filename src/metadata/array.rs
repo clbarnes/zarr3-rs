@@ -9,6 +9,8 @@ use crate::{
     CoordVec, GridCoord, MaybeNdim, Ndim, ZARR_FORMAT,
 };
 
+use super::JsonObject;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RegularChunkGrid {
     chunk_shape: GridCoord,
@@ -50,7 +52,7 @@ pub struct Extension(serde_json::Value);
 
 impl Extension {
     pub fn try_understand(&self) -> Result<(), &'static str> {
-        let mut map: HashMap<String, serde_json::Value> =
+        let mut map: JsonObject =
             serde_json::from_value(self.0.clone()).map_err(|_| "Extension is not an object")?;
         let mu_value = map
             .remove("must_understand")
@@ -79,7 +81,7 @@ pub struct ArrayMetadata {
     #[serde(default = "CodecChain::default")]
     codecs: CodecChain,
     #[serde(default = "HashMap::default")]
-    attributes: HashMap<String, serde_json::Value>,
+    attributes: JsonObject,
     #[serde(skip_serializing_if = "Option::is_none")]
     dimension_names: Option<CoordVec<Option<String>>>,
     #[serde(flatten)]
@@ -102,7 +104,7 @@ impl ArrayMetadata {
         fill_value: serde_json::Value,
         storage_transformers: Vec<StorageTransformer>,
         codecs: CodecChain,
-        attributes: HashMap<String, serde_json::Value>,
+        attributes: JsonObject,
         dimension_names: Option<CoordVec<Option<String>>>,
         extensions: HashMap<String, Extension>,
     ) -> Self {
@@ -130,7 +132,7 @@ impl ArrayMetadata {
         fill_value: serde_json::Value,
         storage_transformers: Vec<StorageTransformer>,
         codecs: CodecChain,
-        attributes: HashMap<String, serde_json::Value>,
+        attributes: JsonObject,
         dimension_names: Option<CoordVec<Option<String>>>,
         extensions: HashMap<String, Extension>,
     ) -> Result<Self, &'static str> {
@@ -175,6 +177,9 @@ impl ArrayMetadata {
     }
 
     pub fn get_effective_fill_value<T: ReflectedType>(&self) -> Result<T, &'static str> {
+        if T::ZARR_TYPE != self.data_type {
+            return Err("Reflected type mismatches array data type");
+        }
         serde_json::from_value(self.fill_value.clone())
             .map_err(|_| "Could not deserialize fill value")
     }
@@ -188,7 +193,7 @@ pub struct ArrayMetadataBuilder {
     fill_value: Option<serde_json::Value>,
     storage_transformers: Vec<StorageTransformer>,
     codecs: CodecChain,
-    attributes: HashMap<String, serde_json::Value>,
+    attributes: JsonObject,
     dimension_names: Option<CoordVec<Option<String>>>,
     extensions: HashMap<String, Extension>,
 }
@@ -305,9 +310,14 @@ impl ArrayMetadataBuilder {
         self
     }
 
-    /// Mutable access to the array's arbitrary attributes.
-    pub fn attributes_mut(&mut self) -> &mut HashMap<String, serde_json::Value> {
-        &mut self.attributes
+    pub fn set_attribute<S: Serialize>(
+        mut self,
+        key: String,
+        value: S,
+    ) -> Result<Self, &'static str> {
+        let v = serde_json::to_value(value).map_err(|_| "Could not serialize value")?;
+        self.attributes.insert(key, v);
+        Ok(self)
     }
 
     /// Set the dimension names.

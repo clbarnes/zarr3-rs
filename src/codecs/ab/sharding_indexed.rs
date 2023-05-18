@@ -3,7 +3,6 @@ use std::io::{BufWriter, Cursor, Read, Seek};
 use thiserror::Error;
 
 use crate::chunk_arr::{offset_shape_to_slice_info, ChunkIter};
-// use crate::chunk_arr::{ChunkSpec, ChunkSpecConstructionError};
 use crate::codecs::aa::AACodecType;
 use crate::codecs::bb::BBCodecType;
 use crate::codecs::{ArrayRepr, CodecChain};
@@ -138,6 +137,7 @@ impl ABCodec for ShardingIndexedCodec {
         let mut addrs = Vec::default();
         for c_info in ChunkIter::new_strict(self.chunk_shape.clone(), dec_shape).unwrap() {
             let sl = offset_shape_to_slice_info(&c_info.offset, &c_info.shape);
+            // todo: is this a clone which can be avoided?
             let sub_arr = decoded.slice(sl).to_shared();
             self.codecs.encode(sub_arr, &mut curs);
             let nbytes = curs.position();
@@ -162,26 +162,51 @@ impl ABCodec for ShardingIndexedCodec {
     fn decode<T: ReflectedType, R: Read>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
         let shape: Vec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
         let mut arr = <T>::create_empty_array(decoded_repr.fill_value.clone(), shape.as_slice());
-        let mut buf = Vec::default();
-        r.read_to_end(&mut buf).expect("Could not read");
-        let mut curs = Cursor::new(buf);
-        let sh: GridCoord = shape.iter().map(|s| *s as u64).collect();
-        let cspec = ChunkSpec::from_shard(&mut curs, sh).expect("Could not construct chunk spec");
+        let mut chunk_buf = Vec::default();
+        r.read_to_end(&mut chunk_buf).expect("Could not read");
+        let chunk_len = chunk_buf.len();
+        let mut curs = Cursor::new(chunk_buf);
+
+        let n_chunks = shape
+            .iter()
+            .zip(self.chunk_shape.iter())
+            .map(|(a_s, c_s)| *a_s as u64 / c_s)
+            .collect();
+        let cspec =
+            ChunkSpec::from_shard(&mut curs, n_chunks).expect("Could not construct chunk spec");
+
+        let total_chunks = cspec.n_subchunks();
+
+        let mut subchunk_buf: Vec<u8> = Vec::default();
 
         for c_info in ChunkIter::new_strict(self.chunk_shape.clone(), decoded_repr.shape)
             .expect("Could not iterate shard chunks")
         {
             let addr = cspec.get_idx(&c_info.chunk_idx).unwrap().unwrap();
+
             if addr.is_empty() {
                 continue;
             }
-            let mut buf = vec![0; addr.nbytes as usize];
+
+            // this prevents a bad chunk address trying to allocate all our RAM
+            let nbytes = (addr.nbytes as usize).min(
+                chunk_len
+                    - total_chunks * std::mem::size_of::<ChunkAddress>()
+                    - addr.offset as usize,
+            );
+
+            if subchunk_buf.len() < nbytes {
+                // safety factor of 2 to reduce repeated resizes.
+                // Resize is usually fast but might have to re-allocate
+                subchunk_buf.resize(nbytes * 2, 0);
+            }
             curs.seek(SeekFrom::Start(addr.offset))
                 .expect("Could not seek");
-            curs.read_exact(&mut buf).expect("Could not read sub-chunk");
+            curs.read_exact(&mut subchunk_buf[..nbytes])
+                .expect("Could not read sub-chunk");
 
             let sub_arr = self.codecs.decode::<T, _>(
-                buf.as_slice(),
+                &subchunk_buf[..nbytes],
                 ArrayRepr {
                     shape: c_info.shape.clone(),
                     data_type: decoded_repr.data_type.clone(),
@@ -429,5 +454,64 @@ impl ChunkSpec {
         }
 
         idxs.last().unwrap().1
+    }
+
+    pub fn n_subchunks(&self) -> usize {
+        self.chunk_idxs.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::codecs::{aa::TransposeCodec, ab::endian::EndianCodec};
+
+    use super::*;
+    use smallvec::smallvec;
+
+    fn make_arr() -> ArcArrayD<i32> {
+        ArcArrayD::from_shape_vec(vec![50, 60], (0..50 * 60).collect()).unwrap()
+    }
+
+    #[test]
+    fn roundtrip_shard_simple() {
+        let codec = ShardingIndexedCodec::new(smallvec![10, 20]);
+        let arr = make_arr();
+        let arr1 = arr.clone();
+        let mut buf = Cursor::new(Vec::<u8>::default());
+        codec.encode(arr, &mut buf);
+
+        buf.set_position(0);
+        let arr2 = codec.decode::<i32, _>(
+            &mut buf,
+            ArrayRepr::new(vec![50, 60].as_slice(), i32::ZARR_TYPE, 0).unwrap(),
+        );
+
+        assert_eq!(arr1, arr2);
+    }
+
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn roundtrip_shard_complex() {
+        use crate::codecs::bb::gzip_codec::GzipCodec;
+
+        let codec = ShardingIndexedCodec::new(smallvec![10, 20])
+            .push_aa_codec(TransposeCodec::new_f())
+            .unwrap()
+            .ab_codec(EndianCodec::new_big())
+            .unwrap()
+            .push_bb_codec(GzipCodec::default());
+
+        let arr = make_arr();
+        let arr1 = arr.clone();
+        let mut buf = Cursor::new(Vec::<u8>::default());
+        codec.encode(arr, &mut buf);
+
+        buf.set_position(0);
+        let arr2 = codec.decode::<i32, _>(
+            &mut buf,
+            ArrayRepr::new(vec![50, 60].as_slice(), i32::ZARR_TYPE, 0).unwrap(),
+        );
+
+        assert_eq!(arr1, arr2);
     }
 }
