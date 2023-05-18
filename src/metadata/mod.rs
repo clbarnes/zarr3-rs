@@ -4,11 +4,53 @@ use std::collections::HashMap;
 pub use array::{
     ArrayMetadata, ArrayMetadataBuilder, ChunkGrid, Extension, RegularChunkGrid, StorageTransformer,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::variant_from_data;
+use crate::{variant_from_data, ZARR_FORMAT};
 
 pub type JsonObject = HashMap<String, serde_json::Value>;
+
+pub trait NodeMetadata {
+    fn get_zarr_format(&self) -> usize;
+
+    fn get_attributes(&self) -> &JsonObject;
+
+    fn has_attribute(&self, key: &str) -> bool {
+        self.get_attributes().contains_key(key)
+    }
+
+    // todo: is it worth having this?
+    fn get_attribute_value(&self, key: &str) -> Option<serde_json::Value> {
+        self.get_attributes().get(key).map(|v| v.clone())
+    }
+
+    fn get_attribute<T: DeserializeOwned>(
+        &self,
+        key: &str,
+    ) -> Option<Result<T, serde_json::Error>> {
+        self.get_attribute_value(key)
+            .map(|v| serde_json::from_value(v.clone()))
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut JsonObject;
+
+    fn set_attribute<S: Serialize>(
+        &mut self,
+        key: &str,
+        value: S,
+    ) -> Result<Option<serde_json::Value>, serde_json::Error> {
+        let v = serde_json::to_value(value)?;
+        Ok(self.get_attributes_mut().insert(key.to_string(), v))
+    }
+
+    fn clear_attributes(&mut self) {
+        self.get_attributes_mut().clear()
+    }
+
+    fn remove_attribute(&mut self, key: &str) -> Option<serde_json::Value> {
+        self.get_attributes_mut().remove(key)
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GroupMetadata {
@@ -17,11 +59,73 @@ pub struct GroupMetadata {
     attributes: JsonObject,
 }
 
+impl NodeMetadata for GroupMetadata {
+    fn get_attributes(&self) -> &JsonObject {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut JsonObject {
+        &mut self.attributes
+    }
+
+    fn get_zarr_format(&self) -> usize {
+        self.zarr_format
+    }
+}
+
+// For implicit groups
+impl Default for GroupMetadata {
+    fn default() -> Self {
+        Self {
+            zarr_format: ZARR_FORMAT,
+            attributes: JsonObject::default(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "node_type", rename_all = "lowercase")]
 pub enum Metadata {
     Array(ArrayMetadata),
     Group(GroupMetadata),
+}
+
+impl Metadata {
+    pub fn is_array(&self) -> bool {
+        match self {
+            Self::Array(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Default for Metadata {
+    fn default() -> Self {
+        Self::Group(GroupMetadata::default())
+    }
+}
+
+impl NodeMetadata for Metadata {
+    fn get_zarr_format(&self) -> usize {
+        match self {
+            Metadata::Array(m) => m.get_zarr_format(),
+            Metadata::Group(m) => m.get_zarr_format(),
+        }
+    }
+
+    fn get_attributes(&self) -> &JsonObject {
+        match self {
+            Metadata::Array(m) => m.get_attributes(),
+            Metadata::Group(m) => m.get_attributes(),
+        }
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut JsonObject {
+        match self {
+            Metadata::Array(m) => m.get_attributes_mut(),
+            Metadata::Group(m) => m.get_attributes_mut(),
+        }
+    }
 }
 
 variant_from_data!(Metadata, Array, ArrayMetadata);

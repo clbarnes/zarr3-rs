@@ -9,7 +9,7 @@ use crate::{
     CoordVec, GridCoord, MaybeNdim, Ndim, ZARR_FORMAT,
 };
 
-use super::JsonObject;
+use super::{JsonObject, NodeMetadata};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct RegularChunkGrid {
@@ -91,6 +91,20 @@ pub struct ArrayMetadata {
 impl Ndim for ArrayMetadata {
     fn ndim(&self) -> usize {
         self.shape.len()
+    }
+}
+
+impl NodeMetadata for ArrayMetadata {
+    fn get_attributes(&self) -> &JsonObject {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut JsonObject {
+        &mut self.attributes
+    }
+
+    fn get_zarr_format(&self) -> usize {
+        self.zarr_format
     }
 }
 
