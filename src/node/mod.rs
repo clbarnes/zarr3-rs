@@ -187,7 +187,7 @@ mod tests {
         use smallvec::smallvec;
 
         use super::*;
-        use tempdir::TempDir;
+        
 
         #[test]
         fn roundtrip() {

@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     io::{self, ErrorKind},
-    marker::PhantomData,
 };
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +14,7 @@ use crate::{
         ArrayRepr, CodecChain,
     },
     data_type::{DataType, ReflectedType},
-    store::{ListableStore, NodeKey, NodeName, ReadableStore, Store, WriteableStore},
+    store::{ListableStore, NodeKey, ReadableStore, Store, WriteableStore},
     ArcArrayD, CoordVec, GridCoord, MaybeNdim, Ndim, ZARR_FORMAT,
 };
 
@@ -54,7 +53,7 @@ impl From<&[u64]> for ChunkGrid {
 }
 
 impl ChunkGrid {
-    pub fn chunk_shape(&self, idx: &GridCoord) -> GridCoord {
+    pub fn chunk_shape(&self, _idx: &GridCoord) -> GridCoord {
         match self {
             Self::Regular(g) => g.chunk_shape.clone(),
         }

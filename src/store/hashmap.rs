@@ -3,7 +3,7 @@ use std::{
     io::{self, Cursor, Read},
 };
 
-use super::{ListableStore, NodeKey, ReadableStore, Store, WriteableStore};
+use super::{ListableStore, NodeKey, ReadableStore, Store};
 
 pub struct HashMapStore {
     map: HashMap<NodeKey, Vec<u8>>,
