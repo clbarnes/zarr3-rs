@@ -635,7 +635,6 @@ mod tests {
     use crate::{
         chunk_key_encoding::V2ChunkKeyEncoding,
         codecs::{aa::TransposeCodec, ab::endian::EndianCodec, bb::gzip_codec::GzipCodec},
-        data_type::{DataType, FloatSize},
     };
 
     use super::ArrayMetadataBuilder;

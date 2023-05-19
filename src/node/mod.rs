@@ -1,7 +1,7 @@
 mod array;
 use std::collections::HashMap;
 
-use crate::chunk_grid::ChunkGridType;
+
 pub use array::{ArrayMetadata, ArrayMetadataBuilder, Extension, StorageTransformer};
 mod group;
 pub use group::GroupMetadata;
@@ -198,10 +198,10 @@ mod tests {
             chunk_grid::ArrayRegion,
             data_type::ReflectedType,
             node::{array::Array, group::Group},
-            store::{filesystem::FileSystemStore, NodeKey, ReadableStore, Store},
+            store::{filesystem::FileSystemStore, NodeKey, ReadableStore},
             ArcArrayD, GridCoord,
         };
-        use smallvec::{smallvec, SmallVec};
+        use smallvec::{smallvec};
 
         use super::*;
 
