@@ -1,5 +1,5 @@
 use std::{
-    fmt::Display,
+    fmt::{Display, Debug},
     io::{self, BufReader, BufWriter, Read, Write},
     str::FromStr,
 };
@@ -381,6 +381,7 @@ pub trait ReflectedType:
     + Sized
     + serde::ser::Serialize
     + PartialEq
+    + Debug
 {
     const ZARR_TYPE: DataType;
 
@@ -422,12 +423,6 @@ pub trait ReflectedType:
         }
 
         ArcArrayD::from_shape_vec(shape.to_vec(), data).unwrap()
-    }
-
-    // todo: take ArrayRepr directly?
-    fn create_empty_array(fill_value: serde_json::Value, shape: &[usize]) -> ArcArrayD<Self> {
-        let fill = serde_json::from_value(fill_value).expect("Could not deser value");
-        ArcArrayD::from_elem(shape, fill)
     }
 
     // fn create_data_chunk(grid_position: &GridCoord, num_el: u32) -> VecDataChunk<Self> {

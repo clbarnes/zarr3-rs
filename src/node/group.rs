@@ -10,7 +10,7 @@ use crate::{
     ZARR_FORMAT,
 };
 
-use super::{array::Array, ArrayMetadata, JsonObject, NodeMetadata};
+use super::{array::Array, ArrayMetadata, JsonObject, ReadableMetadata, WriteableMetadata};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GroupMetadata {
@@ -19,17 +19,26 @@ pub struct GroupMetadata {
     attributes: JsonObject,
 }
 
-impl NodeMetadata for GroupMetadata {
+impl ReadableMetadata for GroupMetadata {
     fn get_attributes(&self) -> &JsonObject {
         &self.attributes
     }
 
-    fn get_attributes_mut(&mut self) -> &mut JsonObject {
-        &mut self.attributes
-    }
-
     fn get_zarr_format(&self) -> usize {
         self.zarr_format
+    }
+
+    fn is_array(&self) -> bool {
+        false
+    }
+}
+
+impl WriteableMetadata for GroupMetadata {
+    fn mutate_attributes<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut JsonObject) -> R,
+    {
+        f(&mut self.attributes)
     }
 }
 
@@ -90,6 +99,19 @@ impl<'s, S: Store> Group<'s, S> {
 }
 
 impl<'s, S: ReadableStore> Group<'s, S> {
+    pub(crate) fn read_meta(&mut self) -> io::Result<()> {
+        if let Some(r) = self.store.get(&self.meta_key())? {
+            let meta: GroupMetadata = serde_json::from_reader(r).expect("deser error");
+            self.metadata = meta;
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                ErrorKind::NotFound,
+                "Group metadata not found",
+            ))
+        }
+    }
+
     pub fn from_store(store: &'s S, key: NodeKey) -> io::Result<Self> {
         let mut meta_key = key.clone();
         meta_key.with_metadata();

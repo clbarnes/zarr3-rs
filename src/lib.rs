@@ -4,6 +4,7 @@ use ndarray::{ArcArray, IxDyn};
 use smallvec::SmallVec;
 
 mod chunk_arr;
+mod chunk_grid;
 pub mod chunk_key_encoding;
 pub mod codecs;
 mod data_type;
@@ -15,8 +16,13 @@ const COORD_SMALLVEC_SIZE: usize = 6;
 pub const ZARR_FORMAT: usize = 3;
 
 pub type CoordVec<T> = SmallVec<[T; COORD_SMALLVEC_SIZE]>;
+// todo: split into VoxelCoord, ChunkCoord, both usize?
 pub type GridCoord = CoordVec<u64>;
 pub type ArcArrayD<T> = ArcArray<T, IxDyn>;
+
+fn to_usize(coord: &[u64]) -> CoordVec<usize> {
+    coord.iter().map(|n| *n as usize).collect()
+}
 
 #[enum_delegate::register]
 pub trait Ndim {

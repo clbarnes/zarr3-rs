@@ -14,10 +14,10 @@ use std::io::{SeekFrom, Write};
 use super::{ABCodec, ABCodecType};
 
 #[derive(Error, Debug)]
-#[error("Got coord with {coord_ndim} dimensions for array of dimension {array_ndim}")]
+#[error("Got {other_ndim} dimensions when expecting {ref_ndim}")]
 pub struct DimensionMismatch {
-    coord_ndim: usize,
-    array_ndim: usize,
+    ref_ndim: usize,
+    other_ndim: usize,
 }
 
 impl DimensionMismatch {
@@ -26,10 +26,22 @@ impl DimensionMismatch {
             Ok(())
         } else {
             Err(Self {
-                coord_ndim,
-                array_ndim,
+                ref_ndim: coord_ndim,
+                other_ndim: array_ndim,
             })
         }
+    }
+
+    pub fn check_many(reference: usize, others: &[usize]) -> Result<(), Self> {
+        for o in others.iter() {
+            if o != &reference {
+                return Err(Self {
+                    ref_ndim: reference,
+                    other_ndim: *o,
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -68,7 +80,7 @@ impl ShardingIndexedCodec {
 
     /// Set the array->bytes codec.
     ///
-    /// By default, uses a little-[crate::codecs::ab::EndianCodec].
+    /// By default, uses a little-[crate::codecs::ab::endian::EndianCodec].
     ///
     /// Replaces an existing AB codec.
     /// Fails if the dimensions are not compatible with the array's shape.
@@ -159,9 +171,13 @@ impl ABCodec for ShardingIndexedCodec {
             .expect("Could not write shard to underlying buffer");
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, mut r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(
+        &self,
+        mut r: R,
+        decoded_repr: ArrayRepr<T>,
+    ) -> ArcArrayD<T> {
         let shape: Vec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
-        let mut arr = <T>::create_empty_array(decoded_repr.fill_value.clone(), shape.as_slice());
+        let mut arr = decoded_repr.empty_array();
         let mut chunk_buf = Vec::default();
         r.read_to_end(&mut chunk_buf).expect("Could not read");
         let chunk_len = chunk_buf.len();
@@ -209,8 +225,7 @@ impl ABCodec for ShardingIndexedCodec {
                 &subchunk_buf[..nbytes],
                 ArrayRepr {
                     shape: c_info.shape.clone(),
-                    data_type: decoded_repr.data_type.clone(),
-                    fill_value: decoded_repr.fill_value.clone(),
+                    fill_value: decoded_repr.fill_value,
                 },
             );
 
@@ -481,10 +496,7 @@ mod tests {
         codec.encode(arr, &mut buf);
 
         buf.set_position(0);
-        let arr2 = codec.decode::<i32, _>(
-            &mut buf,
-            ArrayRepr::new(vec![50, 60].as_slice(), i32::ZARR_TYPE, 0).unwrap(),
-        );
+        let arr2 = codec.decode::<i32, _>(&mut buf, ArrayRepr::new(vec![50, 60].as_slice(), 0i32));
 
         assert_eq!(arr1, arr2);
     }
@@ -507,10 +519,7 @@ mod tests {
         codec.encode(arr, &mut buf);
 
         buf.set_position(0);
-        let arr2 = codec.decode::<i32, _>(
-            &mut buf,
-            ArrayRepr::new(vec![50, 60].as_slice(), i32::ZARR_TYPE, 0).unwrap(),
-        );
+        let arr2 = codec.decode::<i32, _>(&mut buf, ArrayRepr::new(vec![50, 60].as_slice(), 0i32));
 
         assert_eq!(arr1, arr2);
     }

@@ -13,7 +13,7 @@ impl Store for HashMapStore {}
 
 impl ReadableStore for HashMapStore {
     fn get(&self, key: &NodeKey) -> Result<Option<Box<dyn std::io::Read>>, std::io::Error> {
-        // todo: avoid this clone
+        // todo: avoid this clone, maybe using bytes::Bytes?
         let out = self
             .map
             .get(key)
@@ -34,6 +34,10 @@ impl ReadableStore for HashMapStore {
             out.push(r);
         }
         Ok(out)
+    }
+
+    fn has_key(&self, key: &NodeKey) -> io::Result<bool> {
+        Ok(self.map.contains_key(key))
     }
 }
 

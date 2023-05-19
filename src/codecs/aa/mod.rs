@@ -30,7 +30,10 @@ pub trait AACodec {
 
     fn decode<T: ReflectedType>(&self, encoded: ArcArrayD<T>) -> ArcArrayD<T>;
 
-    fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr;
+    fn compute_encoded_representation<T: ReflectedType>(
+        &self,
+        decoded_repr: ArrayRepr<T>,
+    ) -> ArrayRepr<T>;
 }
 
 impl AACodec for &[AACodecType] {
@@ -50,7 +53,10 @@ impl AACodec for &[AACodecType] {
         e
     }
 
-    fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr {
+    fn compute_encoded_representation<T: ReflectedType>(
+        &self,
+        decoded_repr: ArrayRepr<T>,
+    ) -> ArrayRepr<T> {
         self.iter()
             .fold(decoded_repr, |d, c| c.compute_encoded_representation(d))
     }

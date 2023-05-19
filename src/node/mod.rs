@@ -1,9 +1,8 @@
 mod array;
 use std::collections::HashMap;
 
-pub use array::{
-    ArrayMetadata, ArrayMetadataBuilder, ChunkGrid, Extension, RegularChunkGrid, StorageTransformer,
-};
+use crate::chunk_grid::ChunkGridType;
+pub use array::{ArrayMetadata, ArrayMetadataBuilder, Extension, StorageTransformer};
 mod group;
 pub use group::GroupMetadata;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -12,8 +11,10 @@ use crate::variant_from_data;
 
 pub type JsonObject = HashMap<String, serde_json::Value>;
 
-pub trait NodeMetadata {
+pub trait ReadableMetadata {
     fn get_zarr_format(&self) -> usize;
+
+    fn is_array(&self) -> bool;
 
     fn get_attributes(&self) -> &JsonObject;
 
@@ -26,31 +27,43 @@ pub trait NodeMetadata {
         self.get_attributes().get(key).map(|v| v.clone())
     }
 
-    fn get_attribute<T: DeserializeOwned>(
+    fn get_attribute<D: DeserializeOwned>(
         &self,
         key: &str,
-    ) -> Option<Result<T, serde_json::Error>> {
+    ) -> Option<Result<D, serde_json::Error>> {
         self.get_attribute_value(key)
             .map(|v| serde_json::from_value(v.clone()))
     }
+}
 
-    fn get_attributes_mut(&mut self) -> &mut JsonObject;
+pub trait WriteableMetadata {
+    fn mutate_attributes<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut JsonObject) -> R;
 
+    /// Returns the replaced attribute, if any (without deserialising).
     fn set_attribute<S: Serialize>(
         &mut self,
         key: &str,
         value: S,
     ) -> Result<Option<serde_json::Value>, serde_json::Error> {
         let v = serde_json::to_value(value)?;
-        Ok(self.get_attributes_mut().insert(key.to_string(), v))
+        let k = key.to_string();
+        Ok(self.mutate_attributes(|a| a.insert(k, v)))
     }
 
-    fn clear_attributes(&mut self) {
-        self.get_attributes_mut().clear()
+    /// Returns the number of removed attributes
+    fn clear_attributes(&mut self) -> usize {
+        self.mutate_attributes(|a| {
+            let len = a.len();
+            a.clear();
+            len
+        })
     }
 
+    /// Returns the previous attribute value, if it existed
     fn remove_attribute(&mut self, key: &str) -> Option<serde_json::Value> {
-        self.get_attributes_mut().remove(key)
+        self.mutate_attributes(|a| a.remove(key))
     }
 }
 
@@ -61,26 +74,24 @@ pub enum Metadata {
     Group(GroupMetadata),
 }
 
-impl Metadata {
-    pub fn is_array(&self) -> bool {
-        match self {
-            Self::Array(_) => true,
-            _ => false,
-        }
-    }
-}
-
 impl Default for Metadata {
     fn default() -> Self {
         Self::Group(GroupMetadata::default())
     }
 }
 
-impl NodeMetadata for Metadata {
+impl ReadableMetadata for Metadata {
     fn get_zarr_format(&self) -> usize {
         match self {
             Metadata::Array(m) => m.get_zarr_format(),
             Metadata::Group(m) => m.get_zarr_format(),
+        }
+    }
+
+    fn is_array(&self) -> bool {
+        match self {
+            Self::Array(_) => true,
+            _ => false,
         }
     }
 
@@ -90,11 +101,16 @@ impl NodeMetadata for Metadata {
             Metadata::Group(m) => m.get_attributes(),
         }
     }
+}
 
-    fn get_attributes_mut(&mut self) -> &mut JsonObject {
+impl WriteableMetadata for Metadata {
+    fn mutate_attributes<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut JsonObject) -> R,
+    {
         match self {
-            Metadata::Array(m) => m.get_attributes_mut(),
-            Metadata::Group(m) => m.get_attributes_mut(),
+            Metadata::Array(m) => m.mutate_attributes(f),
+            Metadata::Group(m) => m.mutate_attributes(f),
         }
     }
 }
@@ -179,18 +195,16 @@ mod tests {
     #[cfg(feature = "filesystem")]
     mod filesystem {
         use crate::{
-            data_type::{DataType, FloatSize},
-            node::group::Group,
-            store::{filesystem::FileSystemStore, NodeKey},
-            ArcArrayD,
+            node::{group::Group, array::Array},
+            store::{filesystem::FileSystemStore, NodeKey, Store, ReadableStore},
+            ArcArrayD, chunk_grid::ArrayRegion, data_type::ReflectedType, GridCoord,
         };
-        use smallvec::smallvec;
+        use smallvec::{smallvec, SmallVec};
 
         use super::*;
-        
 
         #[test]
-        fn roundtrip() {
+        fn chunk_roundtrip() {
             let tmp = tempdir::TempDir::new("zarr3-test").unwrap();
             let path = tmp.path().join("root.zarr");
             let store = FileSystemStore::create(path, true).unwrap();
@@ -199,17 +213,16 @@ mod tests {
             g.write_meta().unwrap();
             let g2 = g.create_group("child".parse().unwrap()).unwrap();
 
-            let ameta =
-                ArrayMetadataBuilder::new(smallvec![30, 40], DataType::Float(FloatSize::b32))
-                    .chunk_grid(vec![5, 10].as_slice())
-                    .unwrap()
-                    .build();
+            let ameta = ArrayMetadataBuilder::<f32>::new(smallvec![30, 40])
+                .chunk_grid(vec![5, 10].as_slice())
+                .unwrap()
+                .build();
 
             let arr = g2
                 .create_array::<f32>("array".parse().unwrap(), ameta)
                 .unwrap();
             let chunk = ArcArrayD::from_elem(vec![5, 10].as_slice(), 1.0);
-            arr.write_chunk(&smallvec![0, 0, 0], chunk.clone()).unwrap();
+            arr.write_chunk(&smallvec![0, 0], chunk.clone()).unwrap();
 
             let g_again = Group::from_store(&store, Default::default()).unwrap();
             let g2_key: NodeKey = vec!["child".parse().unwrap()].into_iter().collect();
@@ -218,12 +231,98 @@ mod tests {
                 .get_array::<f32>(vec!["array".parse().unwrap()].into_iter().collect())
                 .unwrap()
                 .unwrap();
-            let chunk2 = arr_again.read_chunk(&smallvec![0, 0, 0]).unwrap();
+            let chunk2 = arr_again.read_chunk(&smallvec![0, 0]).unwrap().unwrap();
             assert_eq!(chunk, chunk2);
 
-            let chunk3 = arr_again.read_chunk(&smallvec![1, 1, 1]).unwrap();
+            let chunk3 = arr_again.read_chunk(&smallvec![1, 1]).unwrap().unwrap();
             assert_eq!(chunk3.shape(), chunk2.shape());
             assert!(chunk3.iter().all(|v| *v == 0.0))
+        }
+
+        fn chunk_contents<S: ReadableStore, T: ReflectedType>(arr: &Array<S, T>, idx: &[u64]) -> Vec<T> {
+            let sv: GridCoord = idx.iter().cloned().collect();
+            let vals = arr.read_chunk(&sv).unwrap().unwrap();
+            vals.iter().cloned().collect()
+        }
+
+        #[test]
+        fn partial_write() {
+            let tmp = tempdir::TempDir::new("zarr3-test").unwrap();
+            let path = tmp.path().join("root.zarr");
+            let store = FileSystemStore::create(path, true).unwrap();
+
+            let g = Group::new(&store, Default::default(), Default::default());
+            g.write_meta().unwrap();
+
+            let ameta = ArrayMetadataBuilder::<i32>::new(smallvec![4, 4])
+                .chunk_grid(vec![2, 2].as_slice())
+                .unwrap()
+                .build();
+
+            let arr = g.create_array::<i32>("array".parse().unwrap(), ameta).unwrap();
+            let offset = smallvec![1, 1];
+
+            let middle = ArcArrayD::from_elem(vec![2, 2].as_slice(), 1i32);
+            arr.write_region(&offset, middle).expect("Could not write region");
+
+            assert_eq!(chunk_contents(&arr, &[0, 0]), vec![0, 0, 0, 1]);
+            assert_eq!(chunk_contents(&arr, &[0, 1]), vec![0, 0, 1, 0]);
+            assert_eq!(chunk_contents(&arr, &[1, 0]), vec![0, 1, 0, 0]);
+            assert_eq!(chunk_contents(&arr, &[1, 1]), vec![1, 0, 0, 0]);
+
+            // let arr_again = g.get_array::<i32>("array".parse().unwrap()).unwrap().unwrap();
+            // let first_again = arr_again.read_chunk(&origin).unwrap().unwrap();
+            // assert_eq!(
+            //     &first_again.iter().cloned().collect::<Vec<_>>(),
+            //     &exp_first,
+            //     "First chunk not read correctly on second open"
+            // );
+            // let whole_arr = arr_again.read_region(ArrayRegion::from_offset_shape(&[0, 0], &[4, 4])).unwrap().unwrap();
+
+            // #[rustfmt::skip]
+            // let expected: Vec<i32> = vec![
+            //     0, 0, 0, 0,
+            //     0, 1, 1, 0,
+            //     0, 1, 1, 0,
+            //     0, 0, 0, 0,
+            // ];
+
+            // let actual: Vec<_> = whole_arr.iter().cloned().collect();
+
+            // assert_eq!(expected, actual);
+        }
+
+        #[test]
+        fn partial_read() {
+            let tmp = tempdir::TempDir::new("zarr3-test").unwrap();
+            let path = tmp.path().join("root.zarr");
+            let store = FileSystemStore::create(path, true).unwrap();
+
+            let g = Group::new(&store, Default::default(), Default::default());
+            g.write_meta().unwrap();
+
+            let ameta = ArrayMetadataBuilder::<i32>::new(smallvec![4, 4])
+                .chunk_grid(vec![2, 2].as_slice())
+                .unwrap()
+                .build();
+
+            let arr = g.create_array::<i32>("array".parse().unwrap(), ameta).unwrap();
+
+            let middle = ArcArrayD::from_elem(vec![2, 2].as_slice(), 1i32);
+            arr.write_chunk(&smallvec![0, 0], middle.clone()).unwrap();
+            arr.write_chunk(&smallvec![0, 1], middle.clone()).unwrap();
+
+            let read_arr = arr.read_region(ArrayRegion::from_offset_shape(&[0, 0], &[4, 4])).unwrap().unwrap();
+            let vals: Vec<_> = read_arr.iter().cloned().collect();
+            #[rustfmt::skip]
+            let expected: Vec<i32> = vec![
+                1, 1, 1, 1,
+                1, 1, 1, 1,
+                0, 0, 0, 0,
+                0, 0, 0, 0,
+            ];
+
+            assert_eq!(vals, expected);
         }
     }
 }

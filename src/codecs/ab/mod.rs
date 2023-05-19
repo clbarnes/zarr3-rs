@@ -16,7 +16,7 @@ use super::ArrayRepr;
 pub trait ABCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W);
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T>;
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T>;
 }
 
 impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
@@ -25,7 +25,7 @@ impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
         // ABCodec::encode::<T, W>(self, decoded, w)
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         (**self).decode(r, decoded_repr)
         // ABCodec::decode::<T, R>(self, r, decoded_repr)
     }
@@ -49,7 +49,7 @@ impl ABCodec for ABCodecType {
         }
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         match self {
             Self::Endian(c) => c.decode(r, decoded_repr),
             Self::ShardingIndexed(c) => c.decode(r, decoded_repr),

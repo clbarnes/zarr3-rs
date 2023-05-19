@@ -109,6 +109,9 @@ impl ReadableStore for FileSystemStore {
 
 impl ListableStore for FileSystemStore {
     fn list_dir(&self, prefix: &NodeKey) -> Result<(Vec<NodeKey>, Vec<NodeKey>), io::Error> {
+        // todo: this is inconsistent.
+        // Directories do not exist:
+        // they only matter if there is a file somewhere beneath them.
         let mut keys = Vec::default();
         let mut prefixes = Vec::default();
 

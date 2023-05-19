@@ -157,7 +157,7 @@ impl ABCodec for CodecChain {
         self.ab_codec().encode::<T, _>(arr.into(), bb_w);
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr) -> ArcArrayD<T> {
+    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         let ab_repr = self
             .aa_codecs
             .as_slice()
@@ -220,29 +220,36 @@ pub enum CodecType {
 }
 
 #[derive(Debug, Clone)]
-pub struct ArrayRepr {
+pub struct ArrayRepr<T: ReflectedType> {
     pub shape: GridCoord,
-    pub data_type: DataType,
-    pub fill_value: serde_json::Value,
+    pub fill_value: T,
 }
 
-impl ArrayRepr {
-    pub fn new<S: Serialize>(
-        shape: &[u64],
-        data_type: DataType,
-        fill_value: S,
-    ) -> Result<Self, &'static str> {
-        let fill = serde_json::to_value(fill_value).map_err(|_| "Could not serialize value")?;
+impl<T: ReflectedType> ArrayRepr<T> {
+    pub fn new(shape: &[u64], fill_value: T) -> Self {
         let s = shape.iter().cloned().collect();
-        data_type
-            .validate_json_value(&fill)
-            .map_err(|_| "Invalid JSON value")?;
-        let repr = ArrayRepr {
+        ArrayRepr {
             shape: s,
-            data_type,
-            fill_value: fill,
-        };
-        Ok(repr)
+            fill_value,
+        }
+    }
+
+    pub fn data_type(&self) -> &DataType {
+        &T::ZARR_TYPE
+    }
+
+    pub fn empty_array(&self) -> ArcArrayD<T> {
+        let sh = self.shape.iter().map(|s| *s as usize).collect::<Vec<_>>();
+        ArcArrayD::from_elem(sh.as_slice(), self.fill_value)
+    }
+}
+
+impl<T: ReflectedType> From<GridCoord> for ArrayRepr<T> {
+    fn from(value: GridCoord) -> Self {
+        ArrayRepr {
+            shape: value,
+            fill_value: Default::default(),
+        }
     }
 }
 
@@ -250,7 +257,6 @@ impl ArrayRepr {
 mod tests {
     use crate::codecs::ab::endian::EndianCodec;
     use crate::codecs::bb::gzip_codec::GzipCodec;
-    use crate::data_type::FloatSize;
     use crate::ArcArrayD;
 
     use super::*;
@@ -272,8 +278,7 @@ mod tests {
 
         let repr = ArrayRepr {
             shape: SHAPE.iter().map(|s| *s as u64).collect(),
-            data_type: DataType::Float(FloatSize::b64),
-            fill_value: serde_json::to_value(0.0).unwrap(),
+            fill_value: 0.0f64,
         };
 
         let arr2 = chain.decode::<f64, _>(buf.as_slice(), repr);
@@ -306,8 +311,7 @@ mod tests {
 
         let repr = ArrayRepr {
             shape: SHAPE.iter().map(|s| *s as u64).collect(),
-            data_type: DataType::Float(FloatSize::b64),
-            fill_value: serde_json::to_value(0.0).unwrap(),
+            fill_value: 0.0f64,
         };
 
         let arr2 = chain.decode::<f64, _>(buf.as_slice(), repr);

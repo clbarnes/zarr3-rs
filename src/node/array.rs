@@ -3,8 +3,15 @@ use std::{
     io::{self, ErrorKind},
 };
 
+use ndarray::Dimension;
 use serde::{Deserialize, Serialize};
 
+use crate::{
+    chunk_arr::offset_shape_to_slice_info,
+    chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType},
+    codecs::ab::sharding_indexed::DimensionMismatch,
+    to_usize,
+};
 use crate::{
     chunk_key_encoding::{ChunkKeyEncoder, ChunkKeyEncoding},
     codecs::{
@@ -18,47 +25,7 @@ use crate::{
     ArcArrayD, CoordVec, GridCoord, MaybeNdim, Ndim, ZARR_FORMAT,
 };
 
-use super::{JsonObject, NodeMetadata};
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RegularChunkGrid {
-    chunk_shape: GridCoord,
-}
-
-impl RegularChunkGrid {
-    fn new<T: Into<GridCoord>>(chunk_shape: T) -> Self {
-        let chunk_shape = chunk_shape.into();
-        Self { chunk_shape }
-    }
-}
-
-impl Ndim for RegularChunkGrid {
-    fn ndim(&self) -> usize {
-        self.chunk_shape.len()
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(tag = "name", content = "configuration", rename_all = "lowercase")]
-#[enum_delegate::implement(MaybeNdim)]
-pub enum ChunkGrid {
-    Regular(RegularChunkGrid),
-}
-
-impl From<&[u64]> for ChunkGrid {
-    fn from(value: &[u64]) -> Self {
-        let cs: GridCoord = value.iter().cloned().collect();
-        Self::Regular(RegularChunkGrid::new(cs))
-    }
-}
-
-impl ChunkGrid {
-    pub fn chunk_shape(&self, _idx: &GridCoord) -> GridCoord {
-        match self {
-            Self::Regular(g) => g.chunk_shape.clone(),
-        }
-    }
-}
+use super::{JsonObject, ReadableMetadata, WriteableMetadata};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "name", content = "configuration")]
@@ -90,7 +57,7 @@ pub struct ArrayMetadata {
     zarr_format: usize,
     shape: GridCoord,
     data_type: DataType,
-    chunk_grid: ChunkGrid,
+    chunk_grid: ChunkGridType,
     chunk_key_encoding: ChunkKeyEncoding,
     fill_value: serde_json::Value,
     #[serde(default = "Vec::default")]
@@ -111,17 +78,26 @@ impl Ndim for ArrayMetadata {
     }
 }
 
-impl NodeMetadata for ArrayMetadata {
+impl ReadableMetadata for ArrayMetadata {
     fn get_attributes(&self) -> &JsonObject {
         &self.attributes
     }
 
-    fn get_attributes_mut(&mut self) -> &mut JsonObject {
-        &mut self.attributes
-    }
-
     fn get_zarr_format(&self) -> usize {
         self.zarr_format
+    }
+
+    fn is_array(&self) -> bool {
+        true
+    }
+}
+
+impl WriteableMetadata for ArrayMetadata {
+    fn mutate_attributes<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut JsonObject) -> R,
+    {
+        f(&mut self.attributes)
     }
 }
 
@@ -130,7 +106,7 @@ impl ArrayMetadata {
         zarr_format: usize,
         shape: GridCoord,
         data_type: DataType,
-        chunk_grid: ChunkGrid,
+        chunk_grid: ChunkGridType,
         chunk_key_encoding: ChunkKeyEncoding,
         fill_value: serde_json::Value,
         storage_transformers: Vec<StorageTransformer>,
@@ -158,7 +134,7 @@ impl ArrayMetadata {
         zarr_format: usize,
         shape: GridCoord,
         data_type: DataType,
-        chunk_grid: ChunkGrid,
+        chunk_grid: ChunkGridType,
         chunk_key_encoding: ChunkKeyEncoding,
         fill_value: serde_json::Value,
         storage_transformers: Vec<StorageTransformer>,
@@ -214,14 +190,27 @@ impl ArrayMetadata {
         serde_json::from_value(self.fill_value.clone())
             .map_err(|_| "Could not deserialize fill value")
     }
+
+    pub fn chunk_should_exist(&self, chunk: &GridCoord) -> bool {
+        DimensionMismatch::check_coords(chunk.len(), self.ndim()).unwrap();
+        self.chunk_should_exist_unchecked(chunk)
+    }
+
+    pub fn chunk_should_exist_unchecked(&self, chunk: &GridCoord) -> bool {
+        let max_chunk = self
+            .chunk_grid
+            .voxel_chunk_unchecked(self.shape.as_slice())
+            .0;
+        max_chunk.iter().zip(chunk.iter()).all(|(ma, ch)| ch <= ma)
+    }
 }
 
-pub struct ArrayMetadataBuilder {
+pub struct ArrayMetadataBuilder<T: ReflectedType> {
     shape: GridCoord,
     data_type: DataType,
-    chunk_grid: Option<ChunkGrid>,
+    chunk_grid: Option<ChunkGridType>,
     chunk_key_encoding: Option<ChunkKeyEncoding>,
-    fill_value: Option<serde_json::Value>,
+    fill_value: Option<T>,
     storage_transformers: Vec<StorageTransformer>,
     codecs: CodecChain,
     attributes: JsonObject,
@@ -229,15 +218,15 @@ pub struct ArrayMetadataBuilder {
     extensions: HashMap<String, Extension>,
 }
 
-impl ArrayMetadataBuilder {
+impl<T: ReflectedType> ArrayMetadataBuilder<T> {
     /// Prepare metadata for a basic array with a shape and data type.
     ///
-    /// At a minimum, [ArrayMetadata::chunk_grid] should be called,
+    /// At a minimum, [ArrayMetadataBuilder::chunk_grid()] should be called,
     /// as the default behaviour is to have a single chunk for the entire array.
-    pub fn new(shape: GridCoord, data_type: DataType) -> Self {
+    pub fn new(shape: GridCoord) -> Self {
         Self {
             shape,
-            data_type,
+            data_type: T::ZARR_TYPE,
             chunk_grid: None,
             chunk_key_encoding: None,
             fill_value: None,
@@ -254,7 +243,10 @@ impl ArrayMetadataBuilder {
     /// By default, the entire array will be a single chunk.
     ///
     /// Fails if the chunk grid is incompatible with the array's dimensionality.
-    pub fn chunk_grid<T: Into<ChunkGrid>>(mut self, chunk_grid: T) -> Result<Self, &'static str> {
+    pub fn chunk_grid<G: Into<ChunkGridType>>(
+        mut self,
+        chunk_grid: G,
+    ) -> Result<Self, &'static str> {
         let cg = chunk_grid.into();
         self.union_ndim(&cg)?;
         self.chunk_grid = Some(cg);
@@ -265,7 +257,7 @@ impl ArrayMetadataBuilder {
     ///
     /// By default, uses the default chunk key encoding
     /// (`c/`-prefixed, `/`-separated).
-    pub fn chunk_key_encoding<T: Into<ChunkKeyEncoding>>(mut self, chunk_key_encoding: T) -> Self {
+    pub fn chunk_key_encoding<E: Into<ChunkKeyEncoding>>(mut self, chunk_key_encoding: E) -> Self {
         self.chunk_key_encoding = Some(chunk_key_encoding.into());
         self
     }
@@ -279,14 +271,9 @@ impl ArrayMetadataBuilder {
     /// This means that types which have compatible JSON representations are interchangeable here:
     /// for example, a f32 fill value can be given for a f64 array,
     /// or a 2-length u8 array fill value can be given for a c128 array.
-    pub fn fill_value<T: Serialize>(mut self, fill_value: T) -> Result<Self, &'static str> {
-        let v = serde_json::to_value(fill_value).map_err(|_e| "Could not serialize fill value")?;
-        self.data_type
-            .validate_json_value(&v)
-            // todo: more useful error
-            .map_err(|_| "Not a valid fill value for this data type")?;
-        self.fill_value = Some(v);
-        Ok(self)
+    pub fn fill_value(mut self, fill_value: T) -> Self {
+        self.fill_value = Some(fill_value);
+        self
     }
 
     /// Mutable access to the array's storage transformers.
@@ -308,11 +295,11 @@ impl ArrayMetadataBuilder {
 
     /// Set the array->bytes codec.
     ///
-    /// By default, uses a little-[crate::codecs::ab::EndianCodec].
+    /// By default, uses a little-[crate::codecs::ab::endian::EndianCodec].
     ///
     /// Replaces an existing AB codec.
     /// Fails if the dimensions are not compatible with the array's shape.
-    pub fn ab_codec<T: Into<ABCodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+    pub fn ab_codec<C: Into<ABCodecType>>(mut self, codec: C) -> Result<Self, &'static str> {
         let c = codec.into();
         self.union_ndim(&c)?;
         self.codecs.replace_ab_codec(Some(c));
@@ -324,7 +311,7 @@ impl ArrayMetadataBuilder {
     /// This will be the last AA encoder, or first AA decoder.
     ///
     /// Fails if the dimensions are not compatible with the array's shape.
-    pub fn push_aa_codec<T: Into<AACodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+    pub fn push_aa_codec<C: Into<AACodecType>>(mut self, codec: C) -> Result<Self, &'static str> {
         let c = codec.into();
         self.union_ndim(&c)?;
         self.codecs.aa_codecs_mut().push(c);
@@ -334,7 +321,7 @@ impl ArrayMetadataBuilder {
     /// Append a bytes->bytes codec.
     ///
     /// This will be the last BB encoder, or first BB decoder.
-    pub fn push_bb_codec<T: Into<BBCodecType>>(mut self, codec: T) -> Self {
+    pub fn push_bb_codec<C: Into<BBCodecType>>(mut self, codec: C) -> Self {
         let c = codec.into();
         // todo: check blosc type size
         self.codecs.bb_codecs_mut().push(c);
@@ -375,11 +362,9 @@ impl ArrayMetadataBuilder {
         // todo: should this fail if there are must_understand extensions?
         let chunk_grid = self
             .chunk_grid
-            .unwrap_or_else(|| ChunkGrid::from(self.shape.as_slice()));
+            .unwrap_or_else(|| ChunkGridType::from(self.shape.as_slice()));
         let chunk_key_encoding = self.chunk_key_encoding.unwrap_or_default();
-        let fill_value = self
-            .fill_value
-            .unwrap_or_else(|| self.data_type.default_fill_value());
+        let fill_value = self.fill_value.unwrap_or_default();
 
         ArrayMetadata::new_unchecked(
             ZARR_FORMAT,
@@ -387,7 +372,7 @@ impl ArrayMetadataBuilder {
             self.data_type,
             chunk_grid,
             chunk_key_encoding,
-            fill_value,
+            serde_json::to_value(fill_value).unwrap(),
             self.storage_transformers,
             self.codecs,
             self.attributes,
@@ -397,7 +382,7 @@ impl ArrayMetadataBuilder {
     }
 }
 
-impl Ndim for ArrayMetadataBuilder {
+impl<T: ReflectedType> Ndim for ArrayMetadataBuilder<T> {
     fn ndim(&self) -> usize {
         self.shape.len()
     }
@@ -409,6 +394,35 @@ pub struct Array<'s, S: Store, T: ReflectedType> {
     meta_key: NodeKey,
     metadata: ArrayMetadata,
     fill_value: T,
+}
+
+impl<'s, S: Store, T: ReflectedType> Ndim for Array<'s, S, T> {
+    fn ndim(&self) -> usize {
+        self.metadata.ndim()
+    }
+}
+
+impl<'s, S: Store, T: ReflectedType> ReadableMetadata for Array<'s, S, T> {
+    fn get_zarr_format(&self) -> usize {
+        self.metadata.get_zarr_format()
+    }
+
+    fn is_array(&self) -> bool {
+        true
+    }
+
+    fn get_attributes(&self) -> &JsonObject {
+        self.metadata.get_attributes()
+    }
+}
+
+impl<'s, S: Store, T: ReflectedType> WriteableMetadata for Array<'s, S, T> {
+    fn mutate_attributes<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut JsonObject) -> R,
+    {
+        self.metadata.mutate_attributes(f)
+    }
 }
 
 impl<'s, S: Store, T: ReflectedType> Array<'s, S, T> {
@@ -446,14 +460,9 @@ impl<'s, S: Store, T: ReflectedType> Array<'s, S, T> {
         self.store
     }
 
-    fn chunk_repr(&self, chunk_idx: &GridCoord) -> ArrayRepr {
+    fn chunk_repr(&self, chunk_idx: &GridCoord) -> ArrayRepr<T> {
         let shape = self.metadata.chunk_grid.chunk_shape(&chunk_idx);
-        ArrayRepr::new(
-            shape.as_slice(),
-            self.metadata.data_type.clone(),
-            self.metadata.fill_value.clone(),
-        )
-        .expect("inconsistent dtype/ fill")
+        ArrayRepr::new(shape.as_slice(), self.fill_value)
     }
 
     fn empty_chunk(&self, chunk_idx: &GridCoord) -> Result<ArcArrayD<T>, &'static str> {
@@ -482,16 +491,50 @@ impl<'s, S: ReadableStore, T: ReflectedType> Array<'s, S, T> {
         }
     }
 
-    pub fn read_chunk(&self, chunk_idx: &GridCoord) -> io::Result<ArcArrayD<T>> {
+    /// Read a chunk from the array.
+    ///
+    /// `Err` if IO problems; `Ok(None)` if out of bounds; panics if idx is the wrong dimensionality; `Ok(Some(array))` otherwise.
+    /// Fills in empty chunks with the fill value.
+    ///
+    /// Includes padding values for chunks which overhang the array.
+    pub fn read_chunk(&self, chunk_idx: &GridCoord) -> io::Result<Option<ArcArrayD<T>>> {
+        if !(self.metadata.chunk_should_exist(chunk_idx)) {
+            return Ok(None);
+        }
+
         let key = self
             .metadata
             .chunk_key_encoding
             .chunk_key(&self.key, &chunk_idx);
         if let Some(r) = self.store.get(&key)? {
             let arr = self.metadata.codecs.decode(r, self.chunk_repr(&chunk_idx));
-            Ok(arr)
+            Ok(Some(arr))
         } else {
-            Ok(self.empty_chunk(chunk_idx).expect("wrong data type"))
+            Ok(Some(self.empty_chunk(chunk_idx).expect("wrong data type")))
+        }
+    }
+
+    pub fn read_region(&self, region: ArrayRegion) -> io::Result<Option<ArcArrayD<T>>> {
+        if let Some(r) = region.limit_extent(&self.metadata.shape) {
+            let mut out =
+                ArcArrayD::from_elem(to_usize(r.shape().as_slice()).as_slice(), self.fill_value);
+            for pc in self.metadata.chunk_grid.chunks_in_region(&r) {
+                if let Some(sub_arr) = self.read_chunk(&pc.chunk_idx)? {
+                    let chunk_slice = offset_shape_to_slice_info(
+                        pc.chunk_region.offset().as_slice(),
+                        pc.chunk_region.shape().as_slice(),
+                    );
+                    let sub_chunk = sub_arr.slice_move(chunk_slice);
+                    let out_slice = offset_shape_to_slice_info(
+                        pc.out_region.offset().as_slice(),
+                        pc.out_region.shape().as_slice(),
+                    );
+                    sub_chunk.assign_to(out.slice_mut(out_slice));
+                }
+            }
+            Ok(Some(out))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -536,6 +579,51 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         Ok(())
     }
 
+    pub fn write_region(
+        &self,
+        offset: &GridCoord,
+        array: ArcArrayD<T>,
+    ) -> Result<(), &'static str> {
+        let shape: GridCoord = array.shape().iter().map(|n| *n as u64).collect();
+        let region = ArrayRegion::from_offset_shape(offset, shape.as_slice());
+
+        // trim off overhang, and return if there is nothing left
+        if region
+            .limit_extent_unchecked(&self.metadata.shape)
+            .is_none()
+        {
+            return Ok(());
+        }
+        let slice_within = region.at_origin().slice_info();
+        let array_within = array.slice(slice_within);
+
+	    // todo: not writing enough chunks
+        for pc in self.metadata.chunk_grid.chunks_in_region_unchecked(&region) {
+            let arr_slice = pc.out_region.slice_info();
+            let sub_arr = array_within.slice(arr_slice).to_shared();
+
+            if pc.chunk_region.is_whole(
+                &self
+                    .metadata
+                    .chunk_grid
+                    .chunk_shape_unchecked(&pc.chunk_idx),
+            ) {
+                // whole chunk
+                self.write_chunk(&pc.chunk_idx, sub_arr)?;
+            } else {
+                // partial chunk
+                let mut chunk = self
+                    .read_chunk(&pc.chunk_idx)
+                    .map_err(|_e| "IO error")?
+                    .unwrap();
+                let chunk_slice = pc.chunk_region.slice_info();
+                sub_arr.assign_to(chunk.slice_mut(chunk_slice));
+                self.write_chunk(&pc.chunk_idx, chunk)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn erase(self) -> io::Result<()> {
         self.store.erase_prefix(&self.key)?;
         Ok(())
@@ -555,24 +643,22 @@ mod tests {
 
     #[test]
     fn build_arraymeta() {
-        let _meta =
-            ArrayMetadataBuilder::new(smallvec![100, 200, 300], DataType::Float(FloatSize::b32))
-                .chunk_grid(vec![10, 10, 10].as_slice())
-                .unwrap()
-                .chunk_key_encoding(V2ChunkKeyEncoding::default())
-                .fill_value(1.0)
-                .unwrap()
-                .push_aa_codec(TransposeCodec::new_f())
-                .unwrap()
-                .ab_codec(EndianCodec::new_little())
-                .unwrap()
-                .push_bb_codec(GzipCodec::default())
-                .dimension_names(smallvec![
-                    Some("x".to_string()),
-                    None,
-                    Some("z".to_string())
-                ])
-                .unwrap()
-                .build();
+        let _meta = ArrayMetadataBuilder::new(smallvec![100, 200, 300])
+            .chunk_grid(vec![10, 10, 10].as_slice())
+            .unwrap()
+            .chunk_key_encoding(V2ChunkKeyEncoding::default())
+            .fill_value(1.0)
+            .push_aa_codec(TransposeCodec::new_f())
+            .unwrap()
+            .ab_codec(EndianCodec::new_little())
+            .unwrap()
+            .push_bb_codec(GzipCodec::default())
+            .dimension_names(smallvec![
+                Some("x".to_string()),
+                None,
+                Some("z".to_string())
+            ])
+            .unwrap()
+            .build();
     }
 }

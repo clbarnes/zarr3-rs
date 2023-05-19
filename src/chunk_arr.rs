@@ -1,4 +1,7 @@
-use crate::GridCoord;
+use crate::{
+    chunk_grid::{ArrayRegion, ArraySlice, PartialChunk},
+    CoordVec, GridCoord, Ndim,
+};
 use ndarray::{IxDyn, SliceInfo, SliceInfoElem};
 use smallvec::smallvec;
 
@@ -6,6 +9,8 @@ use smallvec::smallvec;
 pub(crate) struct CIter {
     shape: GridCoord,
     next: Option<GridCoord>,
+    total_size: usize,
+    count: usize,
 }
 
 impl CIter {
@@ -15,20 +20,40 @@ impl CIter {
         } else {
             Some(smallvec![0; shape.len()])
         };
-        Self { shape, next }
+        let total_size = shape.iter().product::<u64>() as usize;
+        Self {
+            shape,
+            next,
+            total_size,
+            count: 0,
+        }
+    }
+}
+
+impl Ndim for CIter {
+    fn ndim(&self) -> usize {
+        self.shape.len()
     }
 }
 
 impl Iterator for CIter {
     type Item = GridCoord;
 
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.total_size - self.count;
+        (remaining, Some(remaining))
+    }
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.next.is_none() {
             return None;
         }
+        self.count += 1;
+
         let curr = self.next.clone();
         let mut finished = false;
 
+        // this scope ends the mutable borrow of self.next
         {
             let c = self.next.as_mut().unwrap();
 
@@ -66,11 +91,21 @@ pub(crate) struct ChunkIter {
     c_iter: CIter,
 }
 
+impl Ndim for ChunkIter {
+    fn ndim(&self) -> usize {
+        self.c_iter.ndim()
+    }
+}
+
 impl Iterator for ChunkIter {
     type Item = ChunkIterOutput;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.c_iter.next().map(|c| self.idx_to_output(c))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.c_iter.size_hint()
     }
 }
 
@@ -142,6 +177,90 @@ impl ChunkIter {
     }
 }
 
+pub struct PartialChunkIter {
+    min_chunk: GridCoord,
+    min_chunk_offset: GridCoord,
+    max_chunk: GridCoord,
+    max_chunk_offset: GridCoord,
+    chunk_shape: GridCoord,
+    c_iter: CIter,
+}
+
+impl PartialChunkIter {
+    pub fn new(
+        min_chunk: GridCoord,
+        min_chunk_offset: GridCoord,
+        max_chunk: GridCoord,
+        max_chunk_offset: GridCoord,
+        chunk_shape: GridCoord,
+    ) -> Self {
+        let shape: GridCoord = min_chunk
+            .iter()
+            .zip(max_chunk.iter())
+            .map(|(mi, ma)| ma - mi)
+            .collect();
+        let c_iter = CIter::new(shape);
+
+        Self {
+            min_chunk,
+            min_chunk_offset,
+            max_chunk,
+            max_chunk_offset,
+            chunk_shape,
+            c_iter,
+        }
+    }
+}
+
+impl Ndim for PartialChunkIter {
+    fn ndim(&self) -> usize {
+        self.c_iter.ndim()
+    }
+}
+
+impl Iterator for PartialChunkIter {
+    type Item = PartialChunk;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let local_chunk_idx = self.c_iter.next()?;
+        let mut chunk_idx = GridCoord::with_capacity(self.ndim());
+        let mut chunk_slices = CoordVec::with_capacity(self.ndim());
+        let mut out_slices = CoordVec::with_capacity(self.ndim());
+
+        for d in 0..self.ndim() {
+            chunk_idx.push(self.min_chunk[d] + local_chunk_idx[d]);
+
+            let (chunk_offset, out_offset) = if local_chunk_idx[d] == 0 {
+                (self.min_chunk_offset[d], 0)
+            } else {
+                (
+                    0,
+                    self.min_chunk_offset[d] + self.chunk_shape[d] * (local_chunk_idx[d] - 1),
+                )
+            };
+
+            let chunk_shape = if chunk_idx[d] == self.max_chunk[d] {
+                self.max_chunk_offset[d] - chunk_offset
+            } else {
+                self.chunk_shape[d] - chunk_offset
+            };
+
+            chunk_slices.push(ArraySlice::new(chunk_offset, chunk_shape));
+            out_slices.push(ArraySlice::new(out_offset, chunk_shape));
+        }
+
+        Some(PartialChunk::new_unchecked(
+            chunk_idx,
+            ArrayRegion::from_iter(chunk_slices),
+            ArrayRegion::from_iter(out_slices),
+        ))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.c_iter.size_hint()
+    }
+}
+
 pub fn offset_shape_to_slice_info(
     offset: &[u64],
     shape: &[u64],
@@ -155,7 +274,7 @@ pub fn offset_shape_to_slice_info(
             step: 1,
         })
         .collect();
-    SliceInfo::try_from(indices).expect("Bad index size size")
+    SliceInfo::try_from(indices).expect("Bad index size")
 }
 
 #[cfg(test)]

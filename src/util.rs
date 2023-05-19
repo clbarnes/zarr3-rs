@@ -1,7 +1,7 @@
 /// For an enum where some variants contain data and some do not,
 /// serializes a given no-data variant as a string of its name.
 ///
-/// From https://github.com/serde-rs/serde/issues/1560#issuecomment-506915291
+/// From <https://github.com/serde-rs/serde/issues/1560#issuecomment-506915291>
 #[macro_export]
 macro_rules! named_unit_variant {
     ($variant:ident) => {
@@ -37,7 +37,7 @@ macro_rules! named_unit_variant {
     };
 }
 
-/// adds From<D> for an enum with a variant containing D
+/// adds `From<D>` for an enum with a variant containing D
 ///
 /// N.B. this is also handled by enum_delegate::implement
 #[macro_export]

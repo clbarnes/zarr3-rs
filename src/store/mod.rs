@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use log::warn;
 use smallvec::SmallVec;
 use std::{
@@ -199,6 +200,29 @@ impl NodeKey {
     pub fn as_slice(&self) -> &[NodeName] {
         self.0.as_slice()
     }
+
+    pub fn encode(&self) -> String {
+        self.0.iter().map(|n| n.as_ref()).join(KEY_SEP)
+    }
+}
+
+impl Display for NodeKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = self.0.iter().map(|n| n.as_ref()).join(KEY_SEP);
+        f.write_str(&s)
+    }
+}
+
+impl FromStr for NodeKey {
+    type Err = InvalidNodeName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut k = Self::default();
+        for n in s.split(KEY_SEP) {
+            k.push(NodeName::new(n.to_owned())?);
+        }
+        return Ok(k);
+    }
 }
 
 impl Default for NodeKey {
@@ -210,8 +234,10 @@ impl Default for NodeKey {
 pub trait Store {}
 
 pub trait ReadableStore: Store {
-    // /// TODO: not in zarr spec
-    // fn exists(&self, key: &NodeKey) -> Result<bool, Error>;
+    /// TODO: not in zarr spec
+    fn has_key(&self, key: &NodeKey) -> io::Result<bool> {
+        self.get(key).map(|o| o.is_some())
+    }
 
     fn get(&self, key: &NodeKey) -> Result<Option<Box<dyn Read>>, Error>;
 
@@ -241,6 +267,7 @@ pub trait ReadableStore: Store {
             let rd = if let Some(b) = bufs.get(key).unwrap() {
                 Some(Box::new(Cursor::new(
                     // todo: unnecessary clone?
+                    // consider bytes::Bytes
                     range.slice(b.as_slice()).to_vec(),
                 )) as Box<dyn Read>)
             } else {
@@ -282,6 +309,7 @@ pub trait ListableStore: Store {
 
 // Readable constraint needed for partial writes
 pub trait WriteableStore: ReadableStore {
+    // todo: consider going back to taking a FnOnce which takes a writer
     fn set(&self, key: &NodeKey) -> io::Result<Box<dyn Write>>;
 
     // fn set_partial_values<F: FnOnce(Box<dyn Write>) -> Result<(), Error>>(

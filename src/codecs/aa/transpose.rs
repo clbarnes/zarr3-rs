@@ -128,7 +128,10 @@ impl AACodec for TransposeCodec {
         }
     }
 
-    fn compute_encoded_representation(&self, decoded_repr: ArrayRepr) -> ArrayRepr {
+    fn compute_encoded_representation<T: ReflectedType>(
+        &self,
+        decoded_repr: ArrayRepr<T>,
+    ) -> ArrayRepr<T> {
         let shape = match &self.order {
             Order::C => decoded_repr.shape,
             Order::F => decoded_repr.shape.iter().rev().cloned().collect(),
@@ -136,7 +139,6 @@ impl AACodec for TransposeCodec {
         };
         ArrayRepr {
             shape,
-            data_type: decoded_repr.data_type,
             fill_value: decoded_repr.fill_value,
         }
     }
