@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Display, Debug},
+    fmt::{Debug, Display},
     io::{self, BufReader, BufWriter, Read, Write},
     str::FromStr,
 };

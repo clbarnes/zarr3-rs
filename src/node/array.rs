@@ -597,7 +597,7 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         let slice_within = region.at_origin().slice_info();
         let array_within = array.slice(slice_within);
 
-	    // todo: not writing enough chunks
+        // todo: not writing enough chunks
         for pc in self.metadata.chunk_grid.chunks_in_region_unchecked(&region) {
             let arr_slice = pc.out_region.slice_info();
             let sub_arr = array_within.slice(arr_slice).to_shared();

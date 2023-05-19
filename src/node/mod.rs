@@ -195,9 +195,11 @@ mod tests {
     #[cfg(feature = "filesystem")]
     mod filesystem {
         use crate::{
-            node::{group::Group, array::Array},
-            store::{filesystem::FileSystemStore, NodeKey, Store, ReadableStore},
-            ArcArrayD, chunk_grid::ArrayRegion, data_type::ReflectedType, GridCoord,
+            chunk_grid::ArrayRegion,
+            data_type::ReflectedType,
+            node::{array::Array, group::Group},
+            store::{filesystem::FileSystemStore, NodeKey, ReadableStore, Store},
+            ArcArrayD, GridCoord,
         };
         use smallvec::{smallvec, SmallVec};
 
@@ -239,7 +241,10 @@ mod tests {
             assert!(chunk3.iter().all(|v| *v == 0.0))
         }
 
-        fn chunk_contents<S: ReadableStore, T: ReflectedType>(arr: &Array<S, T>, idx: &[u64]) -> Vec<T> {
+        fn chunk_contents<S: ReadableStore, T: ReflectedType>(
+            arr: &Array<S, T>,
+            idx: &[u64],
+        ) -> Vec<T> {
             let sv: GridCoord = idx.iter().cloned().collect();
             let vals = arr.read_chunk(&sv).unwrap().unwrap();
             vals.iter().cloned().collect()
@@ -259,11 +264,14 @@ mod tests {
                 .unwrap()
                 .build();
 
-            let arr = g.create_array::<i32>("array".parse().unwrap(), ameta).unwrap();
+            let arr = g
+                .create_array::<i32>("array".parse().unwrap(), ameta)
+                .unwrap();
             let offset = smallvec![1, 1];
 
             let middle = ArcArrayD::from_elem(vec![2, 2].as_slice(), 1i32);
-            arr.write_region(&offset, middle).expect("Could not write region");
+            arr.write_region(&offset, middle)
+                .expect("Could not write region");
 
             assert_eq!(chunk_contents(&arr, &[0, 0]), vec![0, 0, 0, 1]);
             assert_eq!(chunk_contents(&arr, &[0, 1]), vec![0, 0, 1, 0]);
@@ -306,13 +314,18 @@ mod tests {
                 .unwrap()
                 .build();
 
-            let arr = g.create_array::<i32>("array".parse().unwrap(), ameta).unwrap();
+            let arr = g
+                .create_array::<i32>("array".parse().unwrap(), ameta)
+                .unwrap();
 
             let middle = ArcArrayD::from_elem(vec![2, 2].as_slice(), 1i32);
             arr.write_chunk(&smallvec![0, 0], middle.clone()).unwrap();
             arr.write_chunk(&smallvec![0, 1], middle.clone()).unwrap();
 
-            let read_arr = arr.read_region(ArrayRegion::from_offset_shape(&[0, 0], &[4, 4])).unwrap().unwrap();
+            let read_arr = arr
+                .read_region(ArrayRegion::from_offset_shape(&[0, 0], &[4, 4]))
+                .unwrap()
+                .unwrap();
             let vals: Vec<_> = read_arr.iter().cloned().collect();
             #[rustfmt::skip]
             let expected: Vec<i32> = vec![

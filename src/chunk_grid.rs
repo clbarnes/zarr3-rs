@@ -52,7 +52,10 @@ impl Ndim for ArrayRegion {
 
 impl ArrayRegion {
     pub fn at_origin(&self) -> Self {
-        self.0.iter().map(|sl| ArraySlice::new(0, sl.shape)).collect()
+        self.0
+            .iter()
+            .map(|sl| ArraySlice::new(0, sl.shape))
+            .collect()
     }
 
     pub fn is_whole_unchecked(&self, shape: &[u64]) -> bool {
