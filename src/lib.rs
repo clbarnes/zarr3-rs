@@ -7,7 +7,7 @@ mod chunk_arr;
 pub mod chunk_key_encoding;
 pub mod codecs;
 mod data_type;
-pub mod metadata;
+pub mod node;
 pub mod store;
 mod util;
 
@@ -63,6 +63,7 @@ impl<T: Ndim> MaybeNdim for T {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Offset {
     Start(usize),
     End(usize),
@@ -83,6 +84,7 @@ impl Into<SeekFrom> for &Offset {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByteRange {
     offset: Offset,
     nbytes: Option<usize>,

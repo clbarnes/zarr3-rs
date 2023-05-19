@@ -374,11 +374,13 @@ pub trait ReflectedType:
     Send
     + Sync
     + Clone
+    + Copy
     + Default
     + serde::de::DeserializeOwned
     + 'static
     + Sized
     + serde::ser::Serialize
+    + PartialEq
 {
     const ZARR_TYPE: DataType;
 

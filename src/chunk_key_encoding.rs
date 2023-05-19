@@ -3,23 +3,17 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
-use crate::store::KEY_SEP;
+use crate::store::NodeName;
 use crate::{store::NodeKey, CoordVec};
 
 #[enum_delegate::register]
 pub trait ChunkKeyEncoder {
-    fn components(&self, coord: &[u64]) -> CoordVec<String>;
-
-    // probably unnecessary
-    fn encode(&self, coord: &[u64]) -> String {
-        let components = self.components(coord);
-        components.join(KEY_SEP)
-    }
+    fn components(&self, coord: &[u64]) -> CoordVec<NodeName>;
 
     fn chunk_key(&self, node: &NodeKey, coord: &[u64]) -> NodeKey {
         let mut n = node.clone();
         for c in self.components(coord) {
-            n.push_unchecked(&c);
+            n.push(c);
         }
         n
     }
@@ -57,13 +51,13 @@ pub struct DefaultChunkKeyEncoding {
 }
 
 impl ChunkKeyEncoder for DefaultChunkKeyEncoding {
-    fn components(&self, coord: &[u64]) -> CoordVec<String> {
+    fn components(&self, coord: &[u64]) -> CoordVec<NodeName> {
         let mut out = CoordVec::default();
         match self.separator {
             Separator::Slash => {
-                out.push("c".to_owned());
+                out.push("c".parse().unwrap());
                 for n in coord.iter() {
-                    out.push(n.to_string());
+                    out.push(NodeName::new_unchecked(n.to_string()));
                 }
             }
             Separator::Dot => {
@@ -72,7 +66,7 @@ impl ChunkKeyEncoder for DefaultChunkKeyEncoding {
                     .iter()
                     .map(|n| n.to_string())
                     .fold(String::from("c"), |a, b| a + &sep + &b);
-                out.push(s);
+                out.push(NodeName::new_unchecked(s));
             }
         }
         out
@@ -94,15 +88,15 @@ pub struct V2ChunkKeyEncoding {
 }
 
 impl ChunkKeyEncoder for V2ChunkKeyEncoding {
-    fn components(&self, coord: &[u64]) -> CoordVec<String> {
+    fn components(&self, coord: &[u64]) -> CoordVec<NodeName> {
         if coord.is_empty() {
-            return smallvec!["0".to_owned()];
+            return smallvec!["0".parse().unwrap()];
         }
         let mut out = CoordVec::default();
         match self.separator {
             Separator::Slash => {
                 for n in coord.iter() {
-                    out.push(n.to_string());
+                    out.push(NodeName::new_unchecked(n.to_string()));
                 }
             }
             Separator::Dot => {
@@ -112,7 +106,7 @@ impl ChunkKeyEncoder for V2ChunkKeyEncoding {
                     .map(|n| n.to_string())
                     .reduce(|a, b| a + &sep + &b)
                     .unwrap();
-                out.push(s);
+                out.push(NodeName::new_unchecked(s));
             }
         }
         out
@@ -193,14 +187,18 @@ mod tests {
     #[test]
     fn default_chunk_key_encoding() {
         let cke = ChunkKeyEncoding::Default(DefaultChunkKeyEncoding::default());
-        let s = cke.encode(&[1, 2, 3]);
-        assert_eq!(&s, "c/1/2/3");
+        let s = cke.components(&[1, 2, 3]);
+        let strs: Vec<_> = s.iter().map(|n| n.as_ref()).collect();
+        let expected = vec!["c", "1", "2", "3"];
+        assert_eq!(strs, expected);
     }
 
     #[test]
     fn v2_chunk_key_encoding() {
         let cke = ChunkKeyEncoding::V2(V2ChunkKeyEncoding::default());
-        let s = cke.encode(&[1, 2, 3]);
-        assert_eq!(&s, "1.2.3");
+        let s = cke.components(&[1, 2, 3]);
+        let strs: Vec<_> = s.iter().map(|n| n.as_ref()).collect();
+        let expected = vec!["1.2.3"];
+        assert_eq!(strs, expected);
     }
 }

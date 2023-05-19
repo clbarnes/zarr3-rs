@@ -7,9 +7,10 @@ edition = "2021"
 
 [features]
 # default = ["bzip", "filesystem", "gzip", "lz", "use_ndarray", "xz"]
-default = ["gzip"]
+default = ["gzip", "filesystem"]
 
 gzip = ["flate2"]
+filesystem = ["walkdir", "fs4"]
 # gzip = ["flate2/zlib"]
 # bzip = ["bzip2"]
 # filesystem = ["fs2", "walkdir"]
@@ -34,6 +35,8 @@ enum_delegate = "0.2.0"
 log = "0.4.17"
 num-complex = { version = "0.4", features = ["serde"] }
 itertools = "0.10.5"
+fs4 = { version = "0.6", features = ["sync"], optional = true }
+walkdir = {version = "2", optional = true}
 # fs2 = { version = "0.4", optional = true }
 # itertools = { version = "0.8", optional = true }
 # lz4 = { version = "1.23", optional = true }
@@ -45,6 +48,7 @@ itertools = "0.10.5"
 
 [dev-dependencies]
 cargo-release = "0.24.10"
+tempdir = "0.3.7"
 
 [package.metadata.release]
 disable-publish = true

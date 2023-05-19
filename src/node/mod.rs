@@ -4,9 +4,11 @@ use std::collections::HashMap;
 pub use array::{
     ArrayMetadata, ArrayMetadataBuilder, ChunkGrid, Extension, RegularChunkGrid, StorageTransformer,
 };
+mod group;
+pub use group::GroupMetadata;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{variant_from_data, ZARR_FORMAT};
+use crate::variant_from_data;
 
 pub type JsonObject = HashMap<String, serde_json::Value>;
 
@@ -49,37 +51,6 @@ pub trait NodeMetadata {
 
     fn remove_attribute(&mut self, key: &str) -> Option<serde_json::Value> {
         self.get_attributes_mut().remove(key)
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct GroupMetadata {
-    zarr_format: usize,
-    #[serde(default = "HashMap::default")]
-    attributes: JsonObject,
-}
-
-impl NodeMetadata for GroupMetadata {
-    fn get_attributes(&self) -> &JsonObject {
-        &self.attributes
-    }
-
-    fn get_attributes_mut(&mut self) -> &mut JsonObject {
-        &mut self.attributes
-    }
-
-    fn get_zarr_format(&self) -> usize {
-        self.zarr_format
-    }
-}
-
-// For implicit groups
-impl Default for GroupMetadata {
-    fn default() -> Self {
-        Self {
-            zarr_format: ZARR_FORMAT,
-            attributes: JsonObject::default(),
-        }
     }
 }
 
@@ -203,5 +174,56 @@ mod tests {
             _ => panic!("Expected group metadata"),
         };
         let _s2 = serde_json::to_string(&meta).expect("Couldn't serialize group metadata");
+    }
+
+    #[cfg(feature = "filesystem")]
+    mod filesystem {
+        use crate::{
+            data_type::{DataType, FloatSize},
+            node::group::Group,
+            store::{filesystem::FileSystemStore, NodeKey},
+            ArcArrayD,
+        };
+        use smallvec::smallvec;
+
+        use super::*;
+        use tempdir::TempDir;
+
+        #[test]
+        fn roundtrip() {
+            let tmp = tempdir::TempDir::new("zarr3-test").unwrap();
+            let path = tmp.path().join("root.zarr");
+            let store = FileSystemStore::create(path, true).unwrap();
+
+            let g = Group::new(&store, Default::default(), Default::default());
+            g.write_meta().unwrap();
+            let g2 = g.create_group("child".parse().unwrap()).unwrap();
+
+            let ameta =
+                ArrayMetadataBuilder::new(smallvec![30, 40], DataType::Float(FloatSize::b32))
+                    .chunk_grid(vec![5, 10].as_slice())
+                    .unwrap()
+                    .build();
+
+            let arr = g2
+                .create_array::<f32>("array".parse().unwrap(), ameta)
+                .unwrap();
+            let chunk = ArcArrayD::from_elem(vec![5, 10].as_slice(), 1.0);
+            arr.write_chunk(&smallvec![0, 0, 0], chunk.clone()).unwrap();
+
+            let g_again = Group::from_store(&store, Default::default()).unwrap();
+            let g2_key: NodeKey = vec!["child".parse().unwrap()].into_iter().collect();
+            let g2_again = g_again.get_group(g2_key).unwrap().unwrap();
+            let arr_again = g2_again
+                .get_array::<f32>(vec!["array".parse().unwrap()].into_iter().collect())
+                .unwrap()
+                .unwrap();
+            let chunk2 = arr_again.read_chunk(&smallvec![0, 0, 0]).unwrap();
+            assert_eq!(chunk, chunk2);
+
+            let chunk3 = arr_again.read_chunk(&smallvec![1, 1, 1]).unwrap();
+            assert_eq!(chunk3.shape(), chunk2.shape());
+            assert!(chunk3.iter().all(|v| *v == 0.0))
+        }
     }
 }

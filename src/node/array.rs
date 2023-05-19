@@ -1,12 +1,22 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{self, ErrorKind},
+    marker::PhantomData,
+};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    chunk_key_encoding::ChunkKeyEncoding,
-    codecs::{aa::AACodecType, ab::ABCodecType, bb::BBCodecType, CodecChain},
+    chunk_key_encoding::{ChunkKeyEncoder, ChunkKeyEncoding},
+    codecs::{
+        aa::AACodecType,
+        ab::{ABCodec, ABCodecType},
+        bb::BBCodecType,
+        ArrayRepr, CodecChain,
+    },
     data_type::{DataType, ReflectedType},
-    CoordVec, GridCoord, MaybeNdim, Ndim, ZARR_FORMAT,
+    store::{ListableStore, NodeKey, NodeName, ReadableStore, Store, WriteableStore},
+    ArcArrayD, CoordVec, GridCoord, MaybeNdim, Ndim, ZARR_FORMAT,
 };
 
 use super::{JsonObject, NodeMetadata};
@@ -40,6 +50,14 @@ impl From<&[u64]> for ChunkGrid {
     fn from(value: &[u64]) -> Self {
         let cs: GridCoord = value.iter().cloned().collect();
         Self::Regular(RegularChunkGrid::new(cs))
+    }
+}
+
+impl ChunkGrid {
+    pub fn chunk_shape(&self, idx: &GridCoord) -> GridCoord {
+        match self {
+            Self::Regular(g) => g.chunk_shape.clone(),
+        }
     }
 }
 
@@ -383,6 +401,145 @@ impl ArrayMetadataBuilder {
 impl Ndim for ArrayMetadataBuilder {
     fn ndim(&self) -> usize {
         self.shape.len()
+    }
+}
+
+pub struct Array<'s, S: Store, T: ReflectedType> {
+    store: &'s S,
+    key: NodeKey,
+    meta_key: NodeKey,
+    metadata: ArrayMetadata,
+    fill_value: T,
+}
+
+impl<'s, S: Store, T: ReflectedType> Array<'s, S, T> {
+    /// Does not write metadata
+    pub(crate) fn new(
+        store: &'s S,
+        key: NodeKey,
+        metadata: ArrayMetadata,
+    ) -> Result<Self, &'static str> {
+        let mut meta_key = key.clone();
+        meta_key.with_metadata();
+        if T::ZARR_TYPE != metadata.data_type {
+            return Err("Type annotation mismatches stored data type");
+        }
+        let fill_value = metadata.get_effective_fill_value()?;
+
+        Ok(Self {
+            store,
+            key,
+            meta_key,
+            metadata,
+            fill_value,
+        })
+    }
+
+    fn key(&self) -> &NodeKey {
+        &self.key
+    }
+
+    fn meta_key(&self) -> &NodeKey {
+        &self.meta_key
+    }
+
+    fn store(&self) -> &'s S {
+        self.store
+    }
+
+    fn chunk_repr(&self, chunk_idx: &GridCoord) -> ArrayRepr {
+        let shape = self.metadata.chunk_grid.chunk_shape(&chunk_idx);
+        ArrayRepr::new(
+            shape.as_slice(),
+            self.metadata.data_type.clone(),
+            self.metadata.fill_value.clone(),
+        )
+        .expect("inconsistent dtype/ fill")
+    }
+
+    fn empty_chunk(&self, chunk_idx: &GridCoord) -> Result<ArcArrayD<T>, &'static str> {
+        let shape = self.metadata.chunk_grid.chunk_shape(&chunk_idx);
+
+        let arr = ArcArrayD::from_elem(
+            shape.into_iter().map(|s| s as usize).collect::<Vec<_>>(),
+            self.fill_value,
+        );
+        Ok(arr)
+    }
+}
+
+impl<'s, S: ReadableStore, T: ReflectedType> Array<'s, S, T> {
+    pub fn from_store(store: &'s S, key: NodeKey) -> io::Result<Self> {
+        let mut meta_key = key.clone();
+        meta_key.with_metadata();
+        if let Some(r) = store.get(&meta_key)? {
+            let meta: ArrayMetadata = serde_json::from_reader(r).expect("deser error");
+            Ok(Self::new(store, key, meta).unwrap())
+        } else {
+            Err(io::Error::new(
+                ErrorKind::NotFound,
+                "Group metadata not found",
+            ))
+        }
+    }
+
+    pub fn read_chunk(&self, chunk_idx: &GridCoord) -> io::Result<ArcArrayD<T>> {
+        let key = self
+            .metadata
+            .chunk_key_encoding
+            .chunk_key(&self.key, &chunk_idx);
+        if let Some(r) = self.store.get(&key)? {
+            let arr = self.metadata.codecs.decode(r, self.chunk_repr(&chunk_idx));
+            Ok(arr)
+        } else {
+            Ok(self.empty_chunk(chunk_idx).expect("wrong data type"))
+        }
+    }
+}
+
+impl<'s, S: ListableStore, T: ReflectedType> Array<'s, S, T> {
+    pub fn child_keys(&self) -> io::Result<Vec<NodeKey>> {
+        let (_, keys) = self.store.list_dir(&self.key)?;
+        Ok(keys)
+    }
+}
+
+impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
+    pub(crate) fn write_meta(&self) -> io::Result<()> {
+        let mut w = self.store.set(&self.meta_key)?;
+        serde_json::to_writer_pretty(&mut w, &self.metadata)?;
+        Ok(())
+    }
+
+    pub fn write_chunk(&self, idx: &GridCoord, chunk: ArcArrayD<T>) -> Result<(), &'static str> {
+        let shape = self.metadata.chunk_grid.chunk_shape(&idx);
+        if chunk
+            .shape()
+            .iter()
+            .zip(shape.iter())
+            .any(|(sh, exp)| *sh as u64 != *exp)
+        {
+            return Err("Chunk is the wrong shape");
+        }
+        let key = self.metadata.chunk_key_encoding.chunk_key(&self.key, idx);
+        if chunk.iter().all(|v| v == &self.fill_value) {
+            self.store
+                .erase(&key)
+                .map_err(|_| "Could not erase chunk of fill value")?;
+        }
+
+        let mut w = self
+            .store
+            .set(&key)
+            .map_err(|_| "Could not get chunk writer")?;
+        self.metadata.codecs.encode(chunk, &mut w);
+
+        Ok(())
+    }
+
+    pub fn erase(self) -> io::Result<()> {
+        self.store.erase_prefix(&self.key)?;
+        Ok(())
     }
 }
 

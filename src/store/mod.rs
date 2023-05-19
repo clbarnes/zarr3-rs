@@ -2,17 +2,102 @@ use log::warn;
 use smallvec::SmallVec;
 use std::{
     collections::HashMap,
-    io::{Cursor, Error, Read, Write},
+    fmt::Display,
+    io::{self, Cursor, Error, Read, Write},
+    str::FromStr,
 };
 
-use crate::{ByteRange, Offset};
+use crate::ByteRange;
+
+mod hashmap;
+pub use hashmap::HashMapStore;
+
+#[cfg(feature = "filesystem")]
+pub mod filesystem;
 
 const NODE_KEY_SIZE: usize = 10;
-const METADATA_KEY: &'static str = "zarr.json";
+const METADATA_NAME: &str = "zarr.json";
 pub(crate) const KEY_SEP: &'static str = "/";
 
+fn metadata_name() -> NodeName {
+    METADATA_NAME.parse().unwrap()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NodeKey(SmallVec<[String; NODE_KEY_SIZE]>);
+pub struct NodeName(String);
+
+impl NodeName {
+    pub fn new(s: String) -> Result<Self, InvalidNodeName> {
+        Self::validate(&s)?;
+        Ok(Self::new_unchecked(s))
+    }
+
+    pub(crate) fn new_unchecked(s: String) -> Self {
+        Self(s)
+    }
+
+    fn validate(s: &str) -> Result<(), InvalidNodeName> {
+        let mut is_periods = true;
+        let mut is_underscore = true;
+        let mut has_non_recommended = false;
+        let mut len: usize = 0;
+        for c in s.chars() {
+            if is_periods && c != '.' {
+                is_periods = false;
+            }
+            if is_underscore {
+                if len >= 2 {
+                    return Err(InvalidNodeName::ReservedPrefix);
+                }
+                if c != '_' {
+                    is_underscore = false;
+                }
+            }
+            if c == '/' {
+                return Err(InvalidNodeName::HasSlash);
+            }
+
+            if !has_non_recommended {
+                if !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
+                    has_non_recommended = true;
+                    warn!("Node name has non-recommended character `{}`; prefer `a-z`, `A-Z`, `0-9`, `-`, `_`, `.`", c);
+                }
+            }
+
+            len += 1;
+        }
+        if len == 0 {
+            return Err(InvalidNodeName::Empty);
+        }
+        if is_periods {
+            return Err(InvalidNodeName::IsPeriods);
+        }
+        Ok(())
+    }
+}
+
+impl Display for NodeName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for NodeName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for NodeName {
+    type Err = InvalidNodeName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s.to_owned())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NodeKey(SmallVec<[NodeName; NODE_KEY_SIZE]>);
 
 #[derive(thiserror::Error, Debug)]
 pub enum InvalidNodeName {
@@ -26,44 +111,9 @@ pub enum InvalidNodeName {
     ReservedPrefix,
 }
 
-impl InvalidNodeName {
-    pub fn validate_name(name: &str) -> Result<&str, Self> {
-        let mut is_periods = true;
-        let mut is_underscore = true;
-        let mut has_non_recommended = false;
-        let mut len: usize = 0;
-        for c in name.chars() {
-            if is_periods && c != '.' {
-                is_periods = false;
-            }
-            if is_underscore {
-                if len >= 2 {
-                    return Err(Self::ReservedPrefix);
-                }
-                if c != '_' {
-                    is_underscore = false;
-                }
-            }
-            if c == '/' {
-                return Err(Self::HasSlash);
-            }
-
-            if !has_non_recommended {
-                if !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
-                    has_non_recommended = true;
-                    warn!("Node name has non-recommended character `{}`; prefer `a-z`, `A-Z`, `0-9`, `-`, `_`, `.`", c);
-                }
-            }
-
-            len += 1;
-        }
-        if len == 0 {
-            return Err(Self::Empty);
-        }
-        if is_periods {
-            return Err(Self::IsPeriods);
-        }
-        Ok(name)
+impl FromIterator<NodeName> for NodeKey {
+    fn from_iter<T: IntoIterator<Item = NodeName>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 
@@ -71,22 +121,46 @@ impl NodeKey {
     /// Validates and adds a new key component in-place.
     ///
     /// If Ok, returns the new number of components.
-    pub fn push(&mut self, s: &str) -> Result<usize, InvalidNodeName> {
-        InvalidNodeName::validate_name(s)?;
-        self.0.push(s.to_owned());
-        Ok(self.0.len())
+    pub fn push(&mut self, name: NodeName) -> usize {
+        self.0.push(name);
+        self.0.len()
     }
 
-    pub(crate) fn push_unchecked(&mut self, s: &str) -> usize {
-        self.0.push(s.to_owned());
+    pub fn extend(&mut self, other: NodeKey) -> usize {
+        let mut len = self.0.len();
+        for k in other.0.into_iter() {
+            len = self.push(k);
+        }
+        len
+    }
+
+    pub fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Pop the last key component.
     ///
     /// None if we are at the root.
-    pub fn pop(&mut self) -> Option<String> {
+    pub fn pop(&mut self) -> Option<NodeName> {
         self.0.pop()
+    }
+
+    pub fn common_root(&self, other: &NodeKey) -> NodeKey {
+        self.as_slice()
+            .iter()
+            .zip(other.as_slice().iter())
+            .take_while(|(a, b)| a == b)
+            .map(|(a, _)| a.clone())
+            .collect()
+    }
+
+    pub fn starts_with(&self, other: &NodeKey) -> bool {
+        self.len() >= other.len() && {
+            self.as_slice()
+                .iter()
+                .zip(other.as_slice().iter())
+                .all(|(a, b)| a == b)
+        }
     }
 
     /// Create a new key relative to this one.
@@ -107,23 +181,23 @@ impl NodeKey {
                     }
                 }
                 other => {
-                    new.push(other)?;
+                    new.push(other.parse()?);
                 }
             };
         }
         Ok(Some(new))
     }
 
-    pub(crate) fn key(&self) -> String {
-        self.0.join(KEY_SEP)
+    pub fn is_root(&self) -> bool {
+        self.0.is_empty()
     }
 
-    pub(crate) fn prefix(&self) -> String {
-        self.key() + KEY_SEP
+    pub fn with_metadata(&mut self) -> usize {
+        self.push(metadata_name())
     }
 
-    pub(crate) fn metadata_key(&self) -> String {
-        self.prefix() + METADATA_KEY
+    pub fn as_slice(&self) -> &[NodeName] {
+        self.0.as_slice()
     }
 }
 
@@ -133,33 +207,11 @@ impl Default for NodeKey {
     }
 }
 
-impl TryFrom<&str> for NodeKey {
-    type Error = InvalidNodeName;
+pub trait Store {}
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        value
-            .split(KEY_SEP)
-            .map(|n| InvalidNodeName::validate_name(n).map(|s| s.to_owned()))
-            .collect::<Result<SmallVec<_>, Self::Error>>()
-            .map(|c| Self(c))
-    }
-}
-
-impl TryFrom<&[&str]> for NodeKey {
-    type Error = InvalidNodeName;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        value
-            .iter()
-            .map(|n| InvalidNodeName::validate_name(n).map(|s| s.to_owned()))
-            .collect::<Result<SmallVec<_>, Self::Error>>()
-            .map(|c| Self(c))
-    }
-}
-
-pub trait ReadableStore {
-    /// TODO: not in zarr spec
-    fn exists(&self, key: &NodeKey) -> Result<bool, Error>;
+pub trait ReadableStore: Store {
+    // /// TODO: not in zarr spec
+    // fn exists(&self, key: &NodeKey) -> Result<bool, Error>;
 
     fn get(&self, key: &NodeKey) -> Result<Option<Box<dyn Read>>, Error>;
 
@@ -203,7 +255,7 @@ pub trait ReadableStore {
     // fn uri(&self, key: &NodeKey) -> Result<String, Error>;
 }
 
-pub trait ListableStore {
+pub trait ListableStore: Store {
     /// Retrieve all keys in the store.
     fn list(&self) -> Result<Vec<NodeKey>, Error> {
         self.list_prefix(&NodeKey::default())
@@ -230,7 +282,7 @@ pub trait ListableStore {
 
 // Readable constraint needed for partial writes
 pub trait WriteableStore: ReadableStore {
-    fn set(&self, key: &NodeKey) -> Box<dyn Write>;
+    fn set(&self, key: &NodeKey) -> io::Result<Box<dyn Write>>;
 
     // fn set_partial_values<F: FnOnce(Box<dyn Write>) -> Result<(), Error>>(
     //     &self, key_range_values: Vec<(NodeKey, ByteRange, F)>
