@@ -7,7 +7,6 @@ use ndarray::Dimension;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    chunk_arr::offset_shape_to_slice_info,
     chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType},
     codecs::ab::sharding_indexed::DimensionMismatch,
     to_usize,
@@ -623,7 +622,7 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         let slice_within = region.at_origin().slice_info();
         let array_within = array.slice(slice_within);
 
-        let it = self.metadata.chunk_grid.chunks_in_region_unchecked(&region);
+        let _it = self.metadata.chunk_grid.chunks_in_region_unchecked(&region);
         for pc in self.metadata.chunk_grid.chunks_in_region_unchecked(&region) {
             let arr_slice = pc.out_region.slice_info();
             let sub_arr = array_within.slice(arr_slice).to_shared();
