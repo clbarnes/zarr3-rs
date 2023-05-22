@@ -4,14 +4,14 @@ use smallvec::SmallVec;
 use std::{
     collections::HashMap,
     fmt::Display,
-    io::{self, Cursor, Error, ErrorKind, Read, Write},
+    io::{self, Cursor, Error, Read, Write},
     str::FromStr,
 };
 
 mod hashmap;
 pub use hashmap::HashMapStore;
 
-use crate::{ByteRange, Offset};
+use crate::{ByteRange};
 
 #[cfg(feature = "filesystem")]
 pub mod filesystem;

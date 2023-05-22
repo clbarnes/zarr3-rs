@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     chunk_arr::offset_shape_to_slice_info,
-    chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType, PartialChunk},
+    chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType},
     codecs::ab::sharding_indexed::DimensionMismatch,
     to_usize,
 };
@@ -563,7 +563,7 @@ impl<'s, S: ListableStore, T: ReflectedType> Array<'s, S, T> {
 
 impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
     pub(crate) fn write_meta(&self) -> io::Result<()> {
-        let mut w = self.store.set(&self.meta_key, |mut w| {
+        let _w = self.store.set(&self.meta_key, |mut w| {
             Ok(serde_json::to_writer_pretty(&mut w, &self.metadata).unwrap())
         })?;
         Ok(())
