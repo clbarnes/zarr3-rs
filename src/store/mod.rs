@@ -11,7 +11,7 @@ use std::{
 mod hashmap;
 pub use hashmap::HashMapStore;
 
-use crate::{ByteRange};
+use crate::ByteRange;
 
 #[cfg(feature = "filesystem")]
 pub mod filesystem;

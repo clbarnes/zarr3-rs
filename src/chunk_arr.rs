@@ -197,7 +197,7 @@ impl PartialChunkIter {
         let shape: GridCoord = min_chunk
             .iter()
             .zip(max_chunk.iter())
-            .map(|(mi, ma)| ma - mi)
+            .map(|(mi, ma)| ma - mi + 1)
             .collect();
         let c_iter = CIter::new(shape);
 
@@ -235,7 +235,8 @@ impl Iterator for PartialChunkIter {
             } else {
                 (
                     0,
-                    self.min_chunk_offset[d] + self.chunk_shape[d] * (local_chunk_idx[d] - 1),
+                    self.chunk_shape[d] - self.min_chunk_offset[d]
+                        + self.chunk_shape[d] * (local_chunk_idx[d] - 1),
                 )
             };
 

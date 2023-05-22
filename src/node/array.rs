@@ -524,10 +524,7 @@ impl<'s, S: ReadableStore, T: ReflectedType> Array<'s, S, T> {
     ) -> io::Result<Option<ArcArrayD<T>>> {
         // todo: check it fits in chunk?
         if let Some(sub_arr) = self.read_chunk(chunk_idx)? {
-            let chunk_slice = offset_shape_to_slice_info(
-                chunk_region.offset().as_slice(),
-                chunk_region.shape().as_slice(),
-            );
+            let chunk_slice = chunk_region.slice_info();
             Ok(Some(sub_arr.slice_move(chunk_slice)))
         } else {
             Ok(None)
@@ -535,15 +532,13 @@ impl<'s, S: ReadableStore, T: ReflectedType> Array<'s, S, T> {
     }
 
     pub fn read_region(&self, region: ArrayRegion) -> io::Result<Option<ArcArrayD<T>>> {
-        if let Some(r) = region.limit_extent(&self.metadata.shape) {
+        if let Some(reg) = region.limit_extent(&self.metadata.shape) {
             let mut out =
-                ArcArrayD::from_elem(to_usize(r.shape().as_slice()).as_slice(), self.fill_value);
-            for pc in self.metadata.chunk_grid.chunks_in_region(&r) {
+                ArcArrayD::from_elem(to_usize(reg.shape().as_slice()).as_slice(), self.fill_value);
+            let it = self.metadata.chunk_grid.chunks_in_region(&reg);
+            for pc in it {
                 if let Some(sub_chunk) = self.read_partial_chunk(&pc.chunk_idx, &pc.chunk_region)? {
-                    let out_slice = offset_shape_to_slice_info(
-                        pc.out_region.offset().as_slice(),
-                        pc.out_region.shape().as_slice(),
-                    );
+                    let out_slice = pc.out_region.slice_info();
                     sub_chunk.assign_to(out.slice_mut(out_slice));
                 }
             }
@@ -628,7 +623,7 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         let slice_within = region.at_origin().slice_info();
         let array_within = array.slice(slice_within);
 
-        // todo: not writing enough chunks
+        let it = self.metadata.chunk_grid.chunks_in_region_unchecked(&region);
         for pc in self.metadata.chunk_grid.chunks_in_region_unchecked(&region) {
             let arr_slice = pc.out_region.slice_info();
             let sub_arr = array_within.slice(arr_slice).to_shared();

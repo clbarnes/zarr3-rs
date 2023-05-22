@@ -136,8 +136,10 @@ impl ArrayRegion {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PartialChunk {
     pub chunk_idx: GridCoord,
+    // todo: Option, where None means whole chunk?
     pub chunk_region: ArrayRegion,
     pub out_region: ArrayRegion,
 }

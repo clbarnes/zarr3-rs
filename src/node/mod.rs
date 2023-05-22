@@ -276,27 +276,6 @@ mod tests {
             assert_eq!(chunk_contents(&arr, &[0, 1]), vec![0, 0, 1, 0]);
             assert_eq!(chunk_contents(&arr, &[1, 0]), vec![0, 1, 0, 0]);
             assert_eq!(chunk_contents(&arr, &[1, 1]), vec![1, 0, 0, 0]);
-
-            // let arr_again = g.get_array::<i32>("array".parse().unwrap()).unwrap().unwrap();
-            // let first_again = arr_again.read_chunk(&origin).unwrap().unwrap();
-            // assert_eq!(
-            //     &first_again.iter().cloned().collect::<Vec<_>>(),
-            //     &exp_first,
-            //     "First chunk not read correctly on second open"
-            // );
-            // let whole_arr = arr_again.read_region(ArrayRegion::from_offset_shape(&[0, 0], &[4, 4])).unwrap().unwrap();
-
-            // #[rustfmt::skip]
-            // let expected: Vec<i32> = vec![
-            //     0, 0, 0, 0,
-            //     0, 1, 1, 0,
-            //     0, 1, 1, 0,
-            //     0, 0, 0, 0,
-            // ];
-
-            // let actual: Vec<_> = whole_arr.iter().cloned().collect();
-
-            // assert_eq!(expected, actual);
         }
 
         #[test]
