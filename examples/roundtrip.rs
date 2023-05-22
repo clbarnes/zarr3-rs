@@ -1,3 +1,4 @@
+use zarr3::codecs::bb::gzip_codec::GzipCodec;
 use zarr3::prelude::smallvec::smallvec;
 use zarr3::prelude::{create_root_group, ArrayMetadataBuilder, ArrayRegion, GroupMetadata};
 use zarr3::store::filesystem::FileSystemStore;
@@ -13,6 +14,7 @@ fn main() {
         .chunk_grid(vec![10, 5].as_slice())
         .unwrap()
         .fill_value(-1)
+        .push_bb_codec(GzipCodec::default())
         .build();
 
     let arr = root_group

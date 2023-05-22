@@ -6,6 +6,4 @@ Based heavily on an earlier prototype at [sci-rs/zarr](https://github.com/sci-rs
 
 ## Usage
 
-```rust
-
-```
+See [`examples/roundtrip.rs`](examples/roundtrip.rs) for an example.
