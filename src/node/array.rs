@@ -3,7 +3,6 @@ use std::{
     io::{self, ErrorKind},
 };
 
-use ndarray::Dimension;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -222,9 +221,10 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
     ///
     /// At a minimum, [ArrayMetadataBuilder::chunk_grid()] should be called,
     /// as the default behaviour is to have a single chunk for the entire array.
-    pub fn new(shape: GridCoord) -> Self {
+    pub fn new(shape: &[u64]) -> Self {
+        let s = shape.iter().cloned().collect();
         Self {
-            shape,
+            shape: s,
             data_type: T::ZARR_TYPE,
             chunk_grid: None,
             chunk_key_encoding: None,
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn build_arraymeta() {
-        let _meta = ArrayMetadataBuilder::new(smallvec![100, 200, 300])
+        let _meta = ArrayMetadataBuilder::new(&[100, 200, 300])
             .chunk_grid(vec![10, 10, 10].as_slice())
             .unwrap()
             .chunk_key_encoding(V2ChunkKeyEncoding::default())

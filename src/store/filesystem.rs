@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{self, ErrorKind, Read, Seek, SeekFrom},
     path::PathBuf,
 };
 
@@ -185,7 +185,7 @@ impl WriteableStore for FileSystemStore {
                 fs::remove_file(&path)?;
                 Ok(false)
             }
-            Err(e) if e.kind() != ErrorKind::NotFound => Ok(false),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e),
         }
         // is this sufficient to guarantee that return is correct?

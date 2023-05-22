@@ -9,6 +9,7 @@ pub mod chunk_key_encoding;
 pub mod codecs;
 mod data_type;
 pub mod node;
+pub mod prelude;
 pub mod store;
 mod util;
 

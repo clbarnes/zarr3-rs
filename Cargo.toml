@@ -52,3 +52,6 @@ tempdir = "0.3.7"
 
 [package.metadata.release]
 disable-publish = true
+
+[[example]]
+name = "roundtrip"

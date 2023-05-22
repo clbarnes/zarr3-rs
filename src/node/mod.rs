@@ -1,9 +1,9 @@
 mod array;
 use std::collections::HashMap;
 
-pub use array::{ArrayMetadata, ArrayMetadataBuilder, Extension, StorageTransformer};
+pub use array::{Array, ArrayMetadata, ArrayMetadataBuilder, Extension, StorageTransformer};
 mod group;
-pub use group::GroupMetadata;
+pub use group::{Group, GroupMetadata};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::variant_from_data;
@@ -214,7 +214,7 @@ mod tests {
             g.write_meta().unwrap();
             let g2 = g.create_group("child".parse().unwrap()).unwrap();
 
-            let ameta = ArrayMetadataBuilder::<f32>::new(smallvec![30, 40])
+            let ameta = ArrayMetadataBuilder::<f32>::new(&[30, 40])
                 .chunk_grid(vec![5, 10].as_slice())
                 .unwrap()
                 .build();
@@ -258,7 +258,7 @@ mod tests {
             let g = Group::new(&store, Default::default(), Default::default());
             g.write_meta().unwrap();
 
-            let ameta = ArrayMetadataBuilder::<i32>::new(smallvec![4, 4])
+            let ameta = ArrayMetadataBuilder::<i32>::new(&[4, 4])
                 .chunk_grid(vec![2, 2].as_slice())
                 .unwrap()
                 .build();
@@ -287,7 +287,7 @@ mod tests {
             let g = Group::new(&store, Default::default(), Default::default());
             g.write_meta().unwrap();
 
-            let ameta = ArrayMetadataBuilder::<i32>::new(smallvec![4, 4])
+            let ameta = ArrayMetadataBuilder::<i32>::new(&[4, 4])
                 .chunk_grid(vec![2, 2].as_slice())
                 .unwrap()
                 .build();
