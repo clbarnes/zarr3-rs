@@ -4,14 +4,14 @@ use smallvec::SmallVec;
 use std::{
     collections::HashMap,
     fmt::Display,
-    io::{self, Cursor, Error, Read, Write},
+    io::{self, Cursor, Error, ErrorKind, Read, Write},
     str::FromStr,
 };
 
-use crate::ByteRange;
-
 mod hashmap;
 pub use hashmap::HashMapStore;
+
+use crate::{ByteRange, Offset};
 
 #[cfg(feature = "filesystem")]
 pub mod filesystem;
@@ -234,12 +234,15 @@ impl Default for NodeKey {
 pub trait Store {}
 
 pub trait ReadableStore: Store {
+    type Readable: Read;
+    // todo: different type for partial reads?
+
     /// TODO: not in zarr spec
     fn has_key(&self, key: &NodeKey) -> io::Result<bool> {
         self.get(key).map(|o| o.is_some())
     }
 
-    fn get(&self, key: &NodeKey) -> Result<Option<Box<dyn Read>>, Error>;
+    fn get(&self, key: &NodeKey) -> Result<Option<Self::Readable>, Error>;
 
     fn get_partial_values(
         &self,
@@ -309,52 +312,44 @@ pub trait ListableStore: Store {
 
 // Readable constraint needed for partial writes
 pub trait WriteableStore: ReadableStore {
-    // todo: consider going back to taking a FnOnce which takes a writer
-    fn set(&self, key: &NodeKey) -> io::Result<Box<dyn Write>>;
+    type Writeable: Write;
 
-    // fn set_partial_values<F: FnOnce(Box<dyn Write>) -> Result<(), Error>>(
-    //     &self, key_range_values: Vec<(NodeKey, ByteRange, F)>
-    // ) -> Result<(), Error> {
-    //     let mut bufs = HashMap::with_capacity(key_range_values.len());
-    //     for (key, range, func) in key_range_values.into_iter() {
-    //         if !bufs.contains_key(&key) {
-    //             match self.get(&key) {
-    //                 Ok(Some(mut r)) => {
-    //                     let mut buf = Vec::default();
-    //                     r.read_to_end(&mut buf)?;
-    //                     bufs.insert(key.clone(), buf);
-    //                     Ok(())
-    //                 }
-    //                 Ok(None) => {
-    //                     let mut buf = Vec::default();
-    //                     bufs.insert(key.clone(), buf);
-    //                     Ok(())
-    //                 }
-    //                 Err(e) => Err(e),
-    //             }?;
-    //         }
+    fn set<F>(&self, key: &NodeKey, value: F) -> io::Result<()>
+    where
+        F: FnOnce(&mut Self::Writeable) -> io::Result<()>;
 
-    //         let buf = bufs.get_mut(&key).unwrap();
+    fn set_partial_values(
+        &self,
+        key_range_values: Vec<(NodeKey, usize, Vec<u8>)>,
+    ) -> Result<(), Error> {
+        let mut bufs = HashMap::with_capacity(key_range_values.len());
 
-    //         let s = match range.offset {
-    //             Offset::Start(o) => {
-    //                 if let Some(n) = range.nbytes {
-    //                     o + n
-    //                 } else {
-    //                     o
-    //                 }
-    //             },
-    //             Offset::End(o) => o
-    //         };
-    //         if buf.len() < s {
-    //             buf.resize(s, 0);
-    //         }
-    //         let mut sliced = range.slice_mut(buf.as_mut_slice());
+        for (key, range, vals) in key_range_values.into_iter() {
+            let length = range + vals.len();
 
-    //         func(Box::new(sliced))?;
-    //     }
-    //     Ok(())
-    // }
+            let buf = bufs.entry(key).or_insert_with_key(|k| {
+                match self.get(k).expect("failed to read") {
+                    Some(mut r) => {
+                        let mut v = Vec::default();
+                        r.read_to_end(&mut v).expect("failed to read");
+                        if v.len() < length {
+                            v.resize(length, 0)
+                        }
+                        v
+                    }
+                    None => vec![0; length],
+                }
+            });
+
+            buf.splice(0..length, vals);
+        }
+
+        for (key, mut buf) in bufs {
+            self.set(&key, |w| w.write_all(buf.as_mut()))?;
+        }
+
+        Ok(())
+    }
 
     // TODO differs from spec in that it returns a bool indicating existence of the key at the end of the operation.
     fn erase(&self, key: &NodeKey) -> Result<bool, Error>;

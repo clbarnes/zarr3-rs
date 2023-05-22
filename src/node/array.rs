@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     chunk_arr::offset_shape_to_slice_info,
-    chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType},
+    chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType, PartialChunk},
     codecs::ab::sharding_indexed::DimensionMismatch,
     to_usize,
 };
@@ -416,12 +416,15 @@ impl<'s, S: Store, T: ReflectedType> ReadableMetadata for Array<'s, S, T> {
     }
 }
 
-impl<'s, S: Store, T: ReflectedType> WriteableMetadata for Array<'s, S, T> {
+impl<'s, S: WriteableStore, T: ReflectedType> WriteableMetadata for Array<'s, S, T> {
     fn mutate_attributes<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut JsonObject) -> R,
     {
-        self.metadata.mutate_attributes(f)
+        let result = self.metadata.mutate_attributes(f);
+        // todo: fix this error
+        self.write_meta().expect("metadata io error");
+        result
     }
 }
 
@@ -514,17 +517,29 @@ impl<'s, S: ReadableStore, T: ReflectedType> Array<'s, S, T> {
         }
     }
 
+    fn read_partial_chunk(
+        &self,
+        chunk_idx: &GridCoord,
+        chunk_region: &ArrayRegion,
+    ) -> io::Result<Option<ArcArrayD<T>>> {
+        // todo: check it fits in chunk?
+        if let Some(sub_arr) = self.read_chunk(chunk_idx)? {
+            let chunk_slice = offset_shape_to_slice_info(
+                chunk_region.offset().as_slice(),
+                chunk_region.shape().as_slice(),
+            );
+            Ok(Some(sub_arr.slice_move(chunk_slice)))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn read_region(&self, region: ArrayRegion) -> io::Result<Option<ArcArrayD<T>>> {
         if let Some(r) = region.limit_extent(&self.metadata.shape) {
             let mut out =
                 ArcArrayD::from_elem(to_usize(r.shape().as_slice()).as_slice(), self.fill_value);
             for pc in self.metadata.chunk_grid.chunks_in_region(&r) {
-                if let Some(sub_arr) = self.read_chunk(&pc.chunk_idx)? {
-                    let chunk_slice = offset_shape_to_slice_info(
-                        pc.chunk_region.offset().as_slice(),
-                        pc.chunk_region.shape().as_slice(),
-                    );
-                    let sub_chunk = sub_arr.slice_move(chunk_slice);
+                if let Some(sub_chunk) = self.read_partial_chunk(&pc.chunk_idx, &pc.chunk_region)? {
                     let out_slice = offset_shape_to_slice_info(
                         pc.out_region.offset().as_slice(),
                         pc.out_region.shape().as_slice(),
@@ -548,8 +563,9 @@ impl<'s, S: ListableStore, T: ReflectedType> Array<'s, S, T> {
 
 impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
     pub(crate) fn write_meta(&self) -> io::Result<()> {
-        let mut w = self.store.set(&self.meta_key)?;
-        serde_json::to_writer_pretty(&mut w, &self.metadata)?;
+        let mut w = self.store.set(&self.meta_key, |mut w| {
+            Ok(serde_json::to_writer_pretty(&mut w, &self.metadata).unwrap())
+        })?;
         Ok(())
     }
 
@@ -565,17 +581,33 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         }
         let key = self.metadata.chunk_key_encoding.chunk_key(&self.key, idx);
         if chunk.iter().all(|v| v == &self.fill_value) {
-            self.store
+            return self
+                .store
                 .erase(&key)
-                .map_err(|_| "Could not erase chunk of fill value")?;
+                .map(|_| ())
+                .map_err(|_| "Could not erase chunk of fill value");
         }
 
-        let mut w = self
-            .store
-            .set(&key)
-            .map_err(|_| "Could not get chunk writer")?;
-        self.metadata.codecs.encode(chunk, &mut w);
+        self.store
+            .set(&key, move |mut w| {
+                Ok(self.metadata.codecs.encode(chunk, &mut w))
+            })
+            .map_err(|_| "Could not get chunk writer")
+    }
 
+    fn write_partial_chunk(
+        &self,
+        chunk_idx: &GridCoord,
+        chunk_region: &ArrayRegion,
+        sub_chunk: ArcArrayD<T>,
+    ) -> Result<(), &'static str> {
+        let mut chunk = self
+            .read_chunk(chunk_idx)
+            .map_err(|_e| "IO error")?
+            .unwrap();
+        let chunk_slice = chunk_region.slice_info();
+        sub_chunk.assign_to(chunk.slice_mut(chunk_slice));
+        self.write_chunk(chunk_idx, chunk)?;
         Ok(())
     }
 
@@ -585,15 +617,14 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         array: ArcArrayD<T>,
     ) -> Result<(), &'static str> {
         let shape: GridCoord = array.shape().iter().map(|n| *n as u64).collect();
-        let region = ArrayRegion::from_offset_shape(offset, shape.as_slice());
+        let region_opt = ArrayRegion::from_offset_shape(offset, shape.as_slice())
+            .limit_extent_unchecked(&self.metadata.shape);
 
-        // trim off overhang, and return if there is nothing left
-        if region
-            .limit_extent_unchecked(&self.metadata.shape)
-            .is_none()
-        {
+        if region_opt.is_none() {
             return Ok(());
         }
+        let region = region_opt.unwrap();
+
         let slice_within = region.at_origin().slice_info();
         let array_within = array.slice(slice_within);
 
@@ -612,13 +643,7 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
                 self.write_chunk(&pc.chunk_idx, sub_arr)?;
             } else {
                 // partial chunk
-                let mut chunk = self
-                    .read_chunk(&pc.chunk_idx)
-                    .map_err(|_e| "IO error")?
-                    .unwrap();
-                let chunk_slice = pc.chunk_region.slice_info();
-                sub_arr.assign_to(chunk.slice_mut(chunk_slice));
-                self.write_chunk(&pc.chunk_idx, chunk)?;
+                self.write_partial_chunk(&pc.chunk_idx, &pc.chunk_region, sub_arr)?;
             }
         }
         Ok(())

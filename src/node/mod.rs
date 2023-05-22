@@ -1,7 +1,6 @@
 mod array;
 use std::collections::HashMap;
 
-
 pub use array::{ArrayMetadata, ArrayMetadataBuilder, Extension, StorageTransformer};
 mod group;
 pub use group::GroupMetadata;
@@ -201,7 +200,7 @@ mod tests {
             store::{filesystem::FileSystemStore, NodeKey, ReadableStore},
             ArcArrayD, GridCoord,
         };
-        use smallvec::{smallvec};
+        use smallvec::smallvec;
 
         use super::*;
 

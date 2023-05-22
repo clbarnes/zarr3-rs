@@ -69,12 +69,12 @@ impl FileSystemStore {
         p
     }
 
-    fn file_reader(&self, key: &NodeKey) -> io::Result<Option<BufReader<File>>> {
+    fn file_reader(&self, key: &NodeKey) -> io::Result<Option<File>> {
         let target = self.get_path(key);
         match File::open(&target) {
             Ok(f) => {
                 f.lock_shared()?;
-                Ok(Some(BufReader::new(f)))
+                Ok(Some(f))
             }
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
@@ -83,8 +83,11 @@ impl FileSystemStore {
 }
 
 impl ReadableStore for FileSystemStore {
-    fn get(&self, key: &NodeKey) -> io::Result<Option<Box<dyn Read>>> {
-        Ok(self.file_reader(key)?.map(|f| Box::new(f) as Box<dyn Read>))
+    // todo: buf?
+    type Readable = File;
+
+    fn get(&self, key: &NodeKey) -> Result<Option<Self::Readable>, io::Error> {
+        Ok(self.file_reader(key)?)
     }
 
     fn get_partial_values(
@@ -151,22 +154,26 @@ impl ListableStore for FileSystemStore {
 impl Store for FileSystemStore {}
 
 impl WriteableStore for FileSystemStore {
-    fn set(&self, key: &NodeKey) -> io::Result<Box<dyn io::Write>> {
+    type Writeable = File;
+
+    fn set<F>(&self, key: &NodeKey, value: F) -> io::Result<()>
+    where
+        F: FnOnce(&mut Self::Writeable) -> io::Result<()>,
+    {
         let path = self.get_path(key);
         if !key.is_root() {
             let parent = path.parent().expect("Key is filesystem root");
             fs::create_dir_all(parent)?;
         }
 
-        let f = fs::OpenOptions::new()
+        let mut f = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .truncate(true)
             .create(true)
             .open(path)?;
         f.lock_exclusive()?;
-
-        Ok(Box::new(BufWriter::new(f)) as Box<dyn Write>)
+        value(&mut f)
     }
 
     fn erase(&self, key: &NodeKey) -> io::Result<bool> {

@@ -156,9 +156,10 @@ impl<'s, S: ListableStore> Group<'s, S> {
 
 impl<'s, S: WriteableStore> Group<'s, S> {
     pub(crate) fn write_meta(&self) -> io::Result<()> {
-        let mut w = self.store.set(&self.meta_key)?;
-        serde_json::to_writer_pretty(&mut w, &self.metadata)?;
-        Ok(())
+        self.store.set(&self.meta_key, |mut w| {
+            Ok(serde_json::to_writer_pretty(&mut w, &self.metadata)
+                .expect("could not serialise metadata"))
+        })
     }
 
     /// Deletes any existing group.
