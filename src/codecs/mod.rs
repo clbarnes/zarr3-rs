@@ -301,7 +301,7 @@ mod tests {
             Some(ABCodecType::Endian(EndianCodec::new_big())),
             vec![
                 BBCodecType::Gzip(GzipCodec::default()),
-                BBCodecType::Gzip(GzipCodec { level: 2 }),
+                BBCodecType::Gzip(GzipCodec::from_level(2).unwrap() ),
             ],
         );
         let mut buf: Vec<u8> = Vec::default();

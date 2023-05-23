@@ -1,7 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use thiserror::Error;
 use std::io::{self, Cursor, Read, Write};
 
-use crate::codecs::bb::BBCodec;
+use crate::{codecs::bb::BBCodec, data_type::ReflectedType};
 use blosc::{decompress_bytes, Context};
 pub use blosc::{Clevel, Compressor, ShuffleMode};
 
@@ -11,12 +12,11 @@ pub struct BloscCodec {
     pub cname: Compressor,
     #[serde(deserialize_with = "clevel_from_str", serialize_with = "clevel_to_str")]
     pub clevel: Clevel,
-    #[serde(
-        deserialize_with = "shuffle_from_int",
-        serialize_with = "shuffle_to_int"
-    )]
+    #[serde(with = "shuffle")]
     pub shuffle: ShuffleMode,
     pub blocksize: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typesize: Option<usize>,
 }
 
 fn clevel_eq(c1: Clevel, c2: Clevel) -> bool {
@@ -159,43 +159,106 @@ where
     }
 }
 
-fn shuffle_from_int<'de, D>(deserializer: D) -> Result<ShuffleMode, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    match Deserialize::deserialize(deserializer)? {
-        0 => Ok(ShuffleMode::None),
-        1 => Ok(ShuffleMode::Byte),
-        2 => Ok(ShuffleMode::Bit),
-        _ => Err(serde::de::Error::custom("bad shuffle")),
+mod shuffle {
+    use blosc::ShuffleMode;
+    use serde::{Deserializer, Deserialize, Serializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ShuffleMode, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Deserialize::deserialize(deserializer)? {
+            "noshuffle" => Ok(ShuffleMode::None),
+            "shuffle" => Ok(ShuffleMode::Byte),
+            "bitshuffle" => Ok(ShuffleMode::Bit),
+            s => Err(serde::de::Error::custom(&format!("Unknown blosc shuffle \"{}\"", s))),
+        }
+    }
+
+    pub fn serialize<S>(cname: &ShuffleMode, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match cname {
+            ShuffleMode::None => serializer.serialize_str("noshuffle"),
+            ShuffleMode::Byte => serializer.serialize_str("shuffle"),
+            ShuffleMode::Bit => serializer.serialize_str("bitshuffle"),
+        }
     }
 }
 
-fn shuffle_to_int<S>(cname: &ShuffleMode, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match cname {
-        ShuffleMode::None => serializer.serialize_u8(0),
-        ShuffleMode::Byte => serializer.serialize_u8(1),
-        ShuffleMode::Bit => serializer.serialize_u8(2),
+#[derive(Error, Debug)]
+pub enum BloscBuildError {
+    #[error("`typesize` must not be None if blosc codec shuffling is active (here `{0:?}`)")]
+    TypesizeNeeded(ShuffleMode),
+    #[error("Compressor not available in blosc: `{0:?}`")]
+    UnavailableCompressor(Compressor),
+}
+
+impl BloscBuildError {
+    fn check_compressor(cname: &Compressor) -> Result<(), Self> {
+        if !compressor_supported(cname) {
+            Err(Self::UnavailableCompressor(*cname))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_typesize(shuffle: &ShuffleMode, typesize: &Option<usize>) -> Result<(), Self> {
+        if typesize.is_none() && !shuffle_eq(*shuffle, ShuffleMode::None) {
+            Err(Self::TypesizeNeeded(*shuffle))
+        } else {
+            Ok(())
+        }
     }
 }
 
 impl TryInto<Context> for &BloscCodec {
-    type Error = ();
+    type Error = BloscBuildError;
 
     fn try_into(self) -> Result<Context, Self::Error> {
+        BloscBuildError::check_typesize(&self.shuffle, &self.typesize)?;
         let ctx = Context::new()
-            .compressor(self.cname)?
+            .compressor(self.cname).map_err(|_| BloscBuildError::UnavailableCompressor(self.cname))?
             .clevel(self.clevel)
             .shuffle(self.shuffle)
             .blocksize(if self.blocksize == 0 {
                 None
             } else {
                 Some(self.blocksize)
-            });
+            })
+            .typesize(self.typesize);
         Ok(ctx)
+    }
+}
+
+fn compressor_supported(cname: &Compressor) -> bool {
+    match Context::new().compressor(*cname) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+impl BloscCodec {
+    pub fn new(cname: Compressor, clevel: Clevel, shuffle: ShuffleMode, blocksize: usize, typesize: Option<usize>) -> Result<Self, BloscBuildError> {
+        let codec = Self {
+            cname,
+            clevel,
+            shuffle,
+            blocksize,
+            typesize,
+        };
+        codec.validate()
+    }
+
+    pub fn for_type<T: ReflectedType>(cname: Compressor, clevel: Clevel, shuffle: ShuffleMode, blocksize: usize) -> Result<Self, BloscBuildError> {
+        Self::new(cname, clevel, shuffle, blocksize, Some(std::mem::size_of::<T>()))
+    }
+
+    fn validate(self) -> Result<Self, BloscBuildError> {
+        BloscBuildError::check_compressor(&self.cname)?;
+        BloscBuildError::check_typesize(&self.shuffle, &self.typesize)?;
+        Ok(self)
     }
 }
 
@@ -206,6 +269,7 @@ impl Default for BloscCodec {
             clevel: Clevel::None,
             shuffle: ShuffleMode::None,
             blocksize: 0,
+            typesize: None,
         }
     }
 }
@@ -226,7 +290,7 @@ impl<R: Read> BloscReader<R> {
     /// However, we cannot guarantee that the encoded data is trustworthy.
     fn unsafe_decompress(b: &[u8]) -> io::Result<Vec<u8>> {
         unsafe { decompress_bytes(b) }
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Could not decompress with blosc"))
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Blosc decode failure"))
     }
 
     fn buffer(&mut self) -> io::Result<&mut Cursor<Vec<u8>>> {
@@ -262,6 +326,7 @@ impl<W: Write> BloscWriter<W> {
 impl<W: Write> Write for BloscWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // write to intermediate buffer instead, compress on flush?
+        // or write to blocksize-sized buffer and write when full
         let compressed: Vec<_> = self.ctx.compress(buf).into();
         // input length if write successful, else actual written length.
         self.w.write(&compressed).map(|written| {

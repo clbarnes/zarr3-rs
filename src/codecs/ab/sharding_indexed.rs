@@ -45,6 +45,11 @@ impl DimensionMismatch {
     }
 }
 
+/// Panic if any dimensions mismatch.
+pub fn dimpanic(reference: usize, others: &[usize]) {
+    DimensionMismatch::check_many(reference, others).unwrap()
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ShardingIndexedCodec {
     pub chunk_shape: GridCoord,
