@@ -94,7 +94,6 @@ impl BBCodec for &[BBCodecType] {
 
 #[cfg(feature = "gzip")]
 variant_from_data!(BBCodecType, Gzip, gzip_codec::GzipCodec);
-// compression_from_impl!(Gzip, gzip_codec::GzipCodec);
 
 #[cfg(feature = "blosc")]
 variant_from_data!(BBCodecType, Blosc, blosc_codec::BloscCodec);

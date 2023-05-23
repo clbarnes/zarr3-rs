@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use thiserror::Error;
 use std::io::{self, Cursor, Read, Write};
+use thiserror::Error;
 
 use crate::{codecs::bb::BBCodec, data_type::ReflectedType};
 use blosc::{decompress_bytes, Context};
@@ -161,7 +161,7 @@ where
 
 mod shuffle {
     use blosc::ShuffleMode;
-    use serde::{Deserializer, Deserialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<ShuffleMode, D::Error>
     where
@@ -171,7 +171,10 @@ mod shuffle {
             "noshuffle" => Ok(ShuffleMode::None),
             "shuffle" => Ok(ShuffleMode::Byte),
             "bitshuffle" => Ok(ShuffleMode::Bit),
-            s => Err(serde::de::Error::custom(&format!("Unknown blosc shuffle \"{}\"", s))),
+            s => Err(serde::de::Error::custom(&format!(
+                "Unknown blosc shuffle \"{}\"",
+                s
+            ))),
         }
     }
 
@@ -219,7 +222,8 @@ impl TryInto<Context> for &BloscCodec {
     fn try_into(self) -> Result<Context, Self::Error> {
         BloscBuildError::check_typesize(&self.shuffle, &self.typesize)?;
         let ctx = Context::new()
-            .compressor(self.cname).map_err(|_| BloscBuildError::UnavailableCompressor(self.cname))?
+            .compressor(self.cname)
+            .map_err(|_| BloscBuildError::UnavailableCompressor(self.cname))?
             .clevel(self.clevel)
             .shuffle(self.shuffle)
             .blocksize(if self.blocksize == 0 {
@@ -240,7 +244,13 @@ fn compressor_supported(cname: &Compressor) -> bool {
 }
 
 impl BloscCodec {
-    pub fn new(cname: Compressor, clevel: Clevel, shuffle: ShuffleMode, blocksize: usize, typesize: Option<usize>) -> Result<Self, BloscBuildError> {
+    pub fn new(
+        cname: Compressor,
+        clevel: Clevel,
+        shuffle: ShuffleMode,
+        blocksize: usize,
+        typesize: Option<usize>,
+    ) -> Result<Self, BloscBuildError> {
         let codec = Self {
             cname,
             clevel,
@@ -251,8 +261,19 @@ impl BloscCodec {
         codec.validate()
     }
 
-    pub fn for_type<T: ReflectedType>(cname: Compressor, clevel: Clevel, shuffle: ShuffleMode, blocksize: usize) -> Result<Self, BloscBuildError> {
-        Self::new(cname, clevel, shuffle, blocksize, Some(std::mem::size_of::<T>()))
+    pub fn for_type<T: ReflectedType>(
+        cname: Compressor,
+        clevel: Clevel,
+        shuffle: ShuffleMode,
+        blocksize: usize,
+    ) -> Result<Self, BloscBuildError> {
+        Self::new(
+            cname,
+            clevel,
+            shuffle,
+            blocksize,
+            Some(std::mem::size_of::<T>()),
+        )
     }
 
     fn validate(self) -> Result<Self, BloscBuildError> {

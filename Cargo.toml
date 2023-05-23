@@ -33,6 +33,7 @@ ndarray = "0.15.6"
 serde_with = "3.0.0"
 enum_delegate = "0.2.0"
 log = "0.4.17"
+num-traits = "0.2"
 num-complex = { version = "0.4", features = ["serde"] }
 itertools = "0.10.5"
 fs4 = { version = "0.6", features = ["sync"], optional = true }

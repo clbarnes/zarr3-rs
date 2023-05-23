@@ -100,7 +100,7 @@ impl WriteableMetadata for ArrayMetadata {
 }
 
 impl ArrayMetadata {
-    pub fn new_unchecked(
+    fn new_unchecked(
         zarr_format: usize,
         shape: GridCoord,
         data_type: DataType,
@@ -128,7 +128,7 @@ impl ArrayMetadata {
         }
     }
 
-    pub fn new(
+    fn new(
         zarr_format: usize,
         shape: GridCoord,
         data_type: DataType,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use std::io::{Read, Write};
+use thiserror::Error;
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -47,8 +47,30 @@ impl TryFrom<u32> for GzipLevel {
     }
 }
 
+mod level {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use super::GzipLevel;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<GzipLevel, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let lvl: u32 = Deserialize::deserialize(deserializer)?;
+        GzipLevel::try_from(lvl).map_err(|e| serde::de::Error::custom(e))
+    }
+
+    pub fn serialize<S>(level: &GzipLevel, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u32(*level as u32)
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct GzipCodec {
+    #[serde(with = "level")]
     pub level: GzipLevel,
 }
 
@@ -59,24 +81,26 @@ fn default_gzip_level() -> GzipLevel {
 impl GzipCodec {
     pub fn from_level(level: u32) -> Result<Self, InvalidGzipLevel> {
         Ok(Self {
-            level: level.try_into()?
+            level: level.try_into()?,
         })
     }
 
     pub fn best() -> Self {
         Self {
-            level: GzipLevel::L9
+            level: GzipLevel::L9,
         }
     }
 
     pub fn fastest() -> Self {
         Self {
-            level: GzipLevel::L1
+            level: GzipLevel::L1,
         }
     }
 
     pub fn none() -> Self {
-        Self { level: GzipLevel::None }
+        Self {
+            level: GzipLevel::None,
+        }
     }
 }
 
@@ -95,5 +119,16 @@ impl BBCodec for GzipCodec {
 
     fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
         Box::new(GzDecoder::new(r))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deser_gzip() {
+        let s = r#"{"level": 1}"#;
+        let codec: GzipCodec = serde_json::from_str(s).unwrap();
     }
 }
