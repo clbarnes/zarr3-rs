@@ -129,6 +129,6 @@ mod tests {
     #[test]
     fn deser_gzip() {
         let s = r#"{"level": 1}"#;
-        let codec: GzipCodec = serde_json::from_str(s).unwrap();
+        let _codec: GzipCodec = serde_json::from_str(s).unwrap();
     }
 }
