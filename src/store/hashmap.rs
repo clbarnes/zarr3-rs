@@ -100,19 +100,12 @@ impl WriteableStore for HashMapStore {
     fn erase(&self, key: &NodeKey) -> Result<bool, io::Error> {
         let mut map = self.map.borrow_mut();
         map.remove(key);
-        Ok(true)
+        Ok(false)
     }
 
     fn erase_prefix(&self, key_prefix: &NodeKey) -> Result<bool, io::Error> {
         let mut map = self.map.borrow_mut();
-        let keys_to_erase: Vec<_> = map
-            .keys()
-            .filter(|k| k.len() > key_prefix.len() && k.starts_with(key_prefix))
-            .cloned()
-            .collect();
-        for k in keys_to_erase {
-            map.remove(&k);
-        }
-        todo!()
+        map.retain(|k, _v| !k.starts_with(key_prefix));
+        Ok(false)
     }
 }

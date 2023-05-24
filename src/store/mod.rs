@@ -119,14 +119,17 @@ impl FromIterator<NodeName> for NodeKey {
 }
 
 impl NodeKey {
-    /// Validates and adds a new key component in-place.
+    /// Adds a new key component in-place.
     ///
-    /// If Ok, returns the new number of components.
+    /// Returns the new number of components.
     pub fn push(&mut self, name: NodeName) -> usize {
         self.0.push(name);
         self.0.len()
     }
 
+    /// Append all elements of the other key onto this one in-place.
+    ///
+    /// Returns the new number of components.
     pub fn extend(&mut self, other: NodeKey) -> usize {
         let mut len = self.0.len();
         for k in other.0.into_iter() {
@@ -146,6 +149,9 @@ impl NodeKey {
         self.0.pop()
     }
 
+    /// Find the longest ancestor key shared this and another key.
+    ///
+    /// May be the root (empty key).
     pub fn common_root(&self, other: &NodeKey) -> NodeKey {
         self.as_slice()
             .iter()
@@ -155,6 +161,7 @@ impl NodeKey {
             .collect()
     }
 
+    /// Check whether this key starts with (or equals) the other key.
     pub fn starts_with(&self, other: &NodeKey) -> bool {
         self.len() >= other.len() && {
             self.as_slice()
@@ -231,6 +238,12 @@ impl Default for NodeKey {
     }
 }
 
+impl AsRef<[NodeName]> for NodeKey {
+    fn as_ref(&self) -> &[NodeName] {
+        &self.0
+    }
+}
+
 pub trait Store {}
 
 pub trait ReadableStore: Store {
@@ -242,8 +255,13 @@ pub trait ReadableStore: Store {
         self.get(key).map(|o| o.is_some())
     }
 
+    /// Get a [Read]er representing the contents of the key.
     fn get(&self, key: &NodeKey) -> Result<Option<Self::Readable>, Error>;
 
+    /// Get a number of [Read]ers for partial reads.
+    ///
+    /// The trait's default implementation is inefficient in most cases
+    /// and should be replaced by implementors.
     fn get_partial_values(
         &self,
         key_ranges: &[(NodeKey, ByteRange)],
@@ -311,20 +329,25 @@ pub trait ListableStore: Store {
 }
 
 // Readable constraint needed for partial writes
-pub trait WriteableStore: ReadableStore {
+pub trait WriteableStore: ReadableStore + ListableStore {
     type Writeable: Write;
 
+    /// Write the contents of a key's entire value using the given function.
     fn set<F>(&self, key: &NodeKey, value: F) -> io::Result<()>
     where
         F: FnOnce(&mut Self::Writeable) -> io::Result<()>;
 
+    /// Set partial regions with the given byte vecs.
+    ///
+    /// The trait's default implementation is inefficient in most cases
+    /// and should be replaced by implementors.
     fn set_partial_values(
         &self,
-        key_range_values: Vec<(NodeKey, usize, Vec<u8>)>,
+        key_offset_values: Vec<(NodeKey, usize, Vec<u8>)>,
     ) -> Result<(), Error> {
-        let mut bufs = HashMap::with_capacity(key_range_values.len());
+        let mut bufs = HashMap::with_capacity(key_offset_values.len());
 
-        for (key, range, vals) in key_range_values.into_iter() {
+        for (key, range, vals) in key_offset_values.into_iter() {
             let length = range + vals.len();
 
             let buf = bufs.entry(key).or_insert_with_key(|k| {
@@ -352,8 +375,17 @@ pub trait WriteableStore: ReadableStore {
     }
 
     // TODO differs from spec in that it returns a bool indicating existence of the key at the end of the operation.
+    /// Delete an object at a given key.
     fn erase(&self, key: &NodeKey) -> Result<bool, Error>;
 
     // TODO
-    fn erase_prefix(&self, key_prefix: &NodeKey) -> Result<bool, Error>;
+    /// Delete all objects whose keys start with the given key.
+    ///
+    /// The trait's default implementation may be inefficient.
+    fn erase_prefix(&self, key_prefix: &NodeKey) -> Result<bool, Error> {
+        for key in self.list_prefix(key_prefix)? {
+            self.erase(&key)?;
+        }
+        Ok(false)
+    }
 }

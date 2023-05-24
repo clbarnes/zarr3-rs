@@ -50,6 +50,7 @@ impl Ndim for ArrayRegion {
 }
 
 impl ArrayRegion {
+    /// Return a copy of the region with the same shape but offset at 0.
     pub fn at_origin(&self) -> Self {
         self.0
             .iter()
@@ -64,6 +65,7 @@ impl ArrayRegion {
             .all(|(sl, sh)| sl.offset == 0 && &sl.shape == sh)
     }
 
+    /// If this region has origin 0 and the given shape.
     pub fn is_whole(&self, shape: &[u64]) -> bool {
         DimensionMismatch::check_coords(shape.len(), self.ndim()).unwrap();
         self.is_whole_unchecked(shape)
@@ -77,6 +79,7 @@ impl ArrayRegion {
             .collect()
     }
 
+    /// Panics if dimensions are inconsistent.
     pub fn from_offset_shape(offset: &[u64], shape: &[u64]) -> Self {
         DimensionMismatch::check_coords(offset.len(), shape.len()).unwrap();
         Self::from_offset_shape_unchecked(offset, shape)
@@ -104,6 +107,7 @@ impl ArrayRegion {
         self.0.iter().map(|s| s.end()).collect()
     }
 
+    /// None if scalar.
     pub fn numel(&self) -> Option<u64> {
         self.0.iter().map(|s| s.shape).reduce(|a, b| a * b)
     }
@@ -122,7 +126,22 @@ impl ArrayRegion {
         Some(Self(slices))
     }
 
+    /// Create a [ndarray::SliceInfo] from this region.
     pub fn slice_info(&self) -> SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
+        // Using this method saves a bunch of type annotations
+        // compared to using Into directly
+        self.into()
+    }
+}
+
+impl Into<SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn>> for ArrayRegion {
+    fn into(self) -> SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
+        (&self).into()
+    }
+}
+
+impl Into<SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn>> for &ArrayRegion {
+    fn into(self) -> SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
         let indices: Vec<_> = self
             .0
             .iter()
