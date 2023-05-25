@@ -3,7 +3,6 @@ use std::{
     io::{self, ErrorKind},
 };
 
-use ndarray::SliceInfo;
 use serde::{Deserialize, Serialize};
 
 use crate::{

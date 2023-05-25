@@ -1,8 +1,4 @@
-use std::{
-    fmt::Display,
-    io::SeekFrom,
-    ops::{Add, Range},
-};
+use std::{fmt::Display, ops::Range};
 
 use ndarray::{ArcArray, IxDyn};
 use smallvec::SmallVec;
@@ -88,7 +84,7 @@ impl RangeRequest {
 
     pub fn start(&self, len: Option<usize>) -> Option<usize> {
         match self {
-            Self::Range { offset, size } => Some(*offset),
+            Self::Range { offset, size: _ } => Some(*offset),
             Self::Suffix(s) => len.map(|l| l - s),
         }
     }
@@ -96,7 +92,7 @@ impl RangeRequest {
     pub fn end(&self, len: Option<usize>) -> Option<usize> {
         match self {
             Self::Range { offset, size } => size.map(|s| offset + s),
-            Self::Suffix(s) => len,
+            Self::Suffix(_s) => len,
         }
     }
 
@@ -107,7 +103,7 @@ impl RangeRequest {
     fn to_range(&self, len: usize) -> Range<usize> {
         let end = self.end(Some(len)).unwrap();
         match self {
-            Self::Range { offset, size } => *offset..end,
+            Self::Range { offset, size: _ } => *offset..end,
             Self::Suffix(s) => {
                 if &len < s {
                     0..end
