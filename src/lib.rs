@@ -1,4 +1,8 @@
-use std::io::SeekFrom;
+use std::{
+    fmt::Display,
+    io::SeekFrom,
+    ops::{Add, Range},
+};
 
 use ndarray::{ArcArray, IxDyn};
 use smallvec::SmallVec;
@@ -70,75 +74,77 @@ impl<T: Ndim> MaybeNdim for T {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Offset {
-    Start(usize),
-    End(usize),
+// could be generic <T: PartialOrd + Add>
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeRequest {
+    Range { offset: usize, size: Option<usize> },
+    Suffix(usize),
 }
 
-impl Default for Offset {
-    fn default() -> Self {
-        Self::Start(0)
+impl RangeRequest {
+    pub fn new_range(offset: usize, size: Option<usize>) -> Self {
+        Self::Range { offset, size }
     }
-}
 
-impl Into<SeekFrom> for &Offset {
-    fn into(self) -> SeekFrom {
+    pub fn start(&self, len: Option<usize>) -> Option<usize> {
         match self {
-            Offset::Start(o) => SeekFrom::Start(*o as u64),
-            Offset::End(o) => SeekFrom::End(-(*o as i64)),
+            Self::Range { offset, size } => Some(*offset),
+            Self::Suffix(s) => len.map(|l| l - s),
         }
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ByteRange {
-    offset: Offset,
-    nbytes: Option<usize>,
-}
-
-impl ByteRange {
-    pub fn new(offset: isize, nbytes: Option<usize>) -> Self {
-        let o = if offset < 0 {
-            Offset::End((offset.abs()) as usize)
-        } else {
-            Offset::Start(offset as usize)
-        };
-        Self { offset: o, nbytes }
+    pub fn end(&self, len: Option<usize>) -> Option<usize> {
+        match self {
+            Self::Range { offset, size } => size.map(|s| offset + s),
+            Self::Suffix(s) => len,
+        }
     }
 
     pub fn slice<'a, T>(&self, sl: &'a [T]) -> &'a [T] {
-        // todo: what if start, stop are out of bounds?
-        let start = match &self.offset {
-            Offset::Start(o) => *o,
-            Offset::End(o) => sl.len() - o,
-        };
-        if let Some(n) = self.nbytes.as_ref() {
-            &sl[start..start + n]
-        } else {
-            &sl[start..]
+        &sl[self.to_range(sl.len())]
+    }
+
+    fn to_range(&self, len: usize) -> Range<usize> {
+        let end = self.end(Some(len)).unwrap();
+        match self {
+            Self::Range { offset, size } => *offset..end,
+            Self::Suffix(s) => {
+                if &len < s {
+                    0..end
+                } else {
+                    (len - s)..end
+                }
+            }
         }
     }
 
     pub fn slice_mut<'a, T>(&self, sl: &'a mut [T]) -> &'a mut [T] {
         // todo: what if start, stop are out of bounds?
-        let start = match &self.offset {
-            Offset::Start(o) => *o,
-            Offset::End(o) => sl.len() - o,
-        };
-        if let Some(n) = self.nbytes.as_ref() {
-            &mut sl[start..start + n]
-        } else {
-            &mut sl[start..]
+        let len = sl.len();
+        &mut sl[self.to_range(len)]
+    }
+}
+
+impl Default for RangeRequest {
+    fn default() -> Self {
+        Self::Range {
+            offset: 0,
+            size: None,
         }
     }
 }
 
-impl Default for ByteRange {
-    fn default() -> Self {
-        Self {
-            offset: Offset::default(),
-            nbytes: None,
+impl Display for RangeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RangeRequest::Range { offset, size } => {
+                if let Some(s) = size {
+                    f.write_fmt(format_args!("{}-{}", offset, offset + s))
+                } else {
+                    f.write_fmt(format_args!("{}-", offset))
+                }
+            }
+            RangeRequest::Suffix(s) => f.write_fmt(format_args!("-{}", s)),
         }
     }
 }

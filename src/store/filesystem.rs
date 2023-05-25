@@ -9,7 +9,7 @@ use log::warn;
 use walkdir::WalkDir;
 
 use super::{ListableStore, NodeKey, NodeName, ReadableStore, Store, WriteableStore};
-use crate::{ByteRange, Offset};
+use crate::RangeRequest;
 
 pub struct FileSystemStore {
     base_path: PathBuf,
@@ -92,7 +92,7 @@ impl ReadableStore for FileSystemStore {
 
     fn get_partial_values(
         &self,
-        key_ranges: &[(NodeKey, ByteRange)],
+        key_ranges: &[(NodeKey, RangeRequest)],
     ) -> Result<Vec<Option<Box<dyn Read>>>, std::io::Error> {
         let mut out = Vec::with_capacity(key_ranges.len());
 
@@ -218,6 +218,9 @@ struct SubReader<R: Read + Seek> {
     reader: R,
 }
 
+// Replace if/ when
+// https://doc.rust-lang.org/stable/std/io/trait.Seek.html#method.stream_len
+// stabilises
 fn stream_len<S: Seek>(s: &mut S) -> Result<u64, io::Error> {
     let orig = SeekFrom::Start(s.stream_position()?);
     let len = s.seek(SeekFrom::End(0))?;
@@ -226,32 +229,16 @@ fn stream_len<S: Seek>(s: &mut S) -> Result<u64, io::Error> {
 }
 
 impl<R: Read + Seek> SubReader<R> {
-    pub fn new(mut reader: R, range: ByteRange) -> std::io::Result<Self> {
-        let orig_len = stream_len(&mut reader)?;
+    pub fn new(mut reader: R, range: RangeRequest) -> std::io::Result<Self> {
+        let orig_len = Some(stream_len(&mut reader)? as usize);
 
-        let offset = match range.offset {
-            Offset::Start(s) => s as u64,
-            Offset::End(s) => {
-                let s_u64 = s as u64;
-                if s_u64 > orig_len {
-                    return Err(io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "Offset is b before start of stream",
-                    ));
-                }
-                orig_len - (s_u64)
-            }
-        };
-
-        let nbytes = if let Some(n) = range.nbytes {
-            n as u64
-        } else {
-            orig_len - offset
-        };
+        let start = range.start(orig_len).unwrap() as u64;
+        let end = range.end(orig_len).unwrap() as u64;
+        // todo: handle before-start case
 
         Ok(Self {
-            offset,
-            nbytes,
+            offset: start,
+            nbytes: end - start,
             reader,
         })
     }

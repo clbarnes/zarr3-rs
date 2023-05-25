@@ -11,6 +11,7 @@ default = ["gzip", "filesystem"]
 
 gzip = ["flate2"]
 filesystem = ["walkdir", "fs4"]
+http = ["reqwest", "httparse"]
 # gzip = ["flate2/zlib"]
 # bzip = ["bzip2"]
 # filesystem = ["fs2", "walkdir"]
@@ -38,6 +39,9 @@ num-complex = { version = "0.4", features = ["serde"] }
 itertools = "0.10.5"
 fs4 = { version = "0.6", features = ["sync"], optional = true }
 walkdir = {version = "2", optional = true}
+reqwest = {version="0.11",optional=true, features = ["blocking"]}
+bytes = "1.4.0"
+httparse = {version = "1.8.0", optional=true}
 # fs2 = { version = "0.4", optional = true }
 # itertools = { version = "0.8", optional = true }
 # lz4 = { version = "1.23", optional = true }

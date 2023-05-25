@@ -11,10 +11,13 @@ use std::{
 mod hashmap;
 pub use hashmap::HashMapStore;
 
-use crate::ByteRange;
+use crate::RangeRequest;
 
 #[cfg(feature = "filesystem")]
 pub mod filesystem;
+
+#[cfg(feature = "http")]
+pub mod http;
 
 const NODE_KEY_SIZE: usize = 10;
 const METADATA_NAME: &str = "zarr.json";
@@ -208,8 +211,14 @@ impl NodeKey {
         self.0.as_slice()
     }
 
+    /// Encode the key as a string by joining its parts with `/`.
     pub fn encode(&self) -> String {
         self.0.iter().map(|n| n.as_ref()).join(KEY_SEP)
+    }
+
+    /// Encode the key as a string, adding a trailing `/`.
+    pub fn encode_prefix(&self) -> String {
+        self.encode() + "/"
     }
 }
 
@@ -264,7 +273,7 @@ pub trait ReadableStore: Store {
     /// and should be replaced by implementors.
     fn get_partial_values(
         &self,
-        key_ranges: &[(NodeKey, ByteRange)],
+        key_ranges: &[(NodeKey, RangeRequest)],
     ) -> Result<Vec<Option<Box<dyn Read>>>, Error> {
         // could rely on other caching here?
         let mut bufs = HashMap::with_capacity(key_ranges.len());
