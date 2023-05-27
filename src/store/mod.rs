@@ -166,12 +166,12 @@ impl NodeKey {
 
     /// Check whether this key starts with (or equals) the other key.
     pub fn starts_with(&self, other: &NodeKey) -> bool {
-        self.len() >= other.len() && {
-            self.as_slice()
-                .iter()
-                .zip(other.as_slice().iter())
-                .all(|(a, b)| a == b)
-        }
+        self.len() >= other.len() && &self.as_ref()[..other.len()] == other.as_ref()
+    }
+
+    // Check whether the other key starts with this key and is longer.
+    pub fn is_descendant_of(&self, other: &NodeKey) -> bool {
+        other.len() > self.len() && self.as_ref() == &other.as_ref()[..self.len()]
     }
 
     /// Create a new key relative to this one.

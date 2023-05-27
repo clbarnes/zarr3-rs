@@ -1,15 +1,11 @@
-use std::collections::HashSet;
 use std::io::{ErrorKind, Read};
-use std::iter::{repeat, repeat_with, Enumerate};
-use std::ops::Range;
-use std::slice::Windows;
+use std::iter::repeat_with;
 use std::{collections::HashMap, io};
 
 use bytes::{Buf, Bytes};
 use httparse::parse_headers;
 use itertools::Itertools;
 use reqwest::blocking::Response;
-use reqwest::header::HeaderValue;
 use reqwest::Method;
 use reqwest::{
     blocking::{Client, RequestBuilder},
@@ -25,8 +21,7 @@ pub struct HttpStore {
 }
 
 impl HttpStore {
-    /// If `base_url` does not end with a `/`,
-    /// the last component will be trimmed off when further components are added.
+    /// `base_url` must end with a `/`.
     /// `client` should be constructed with any required headers
     /// (see [reqwest::blocking::ClientBuilder]).
     pub fn new<U: IntoUrl>(
@@ -53,23 +48,6 @@ impl HttpStore {
             builder = builder.basic_auth(u, Some(p));
         }
         Ok(builder)
-    }
-
-    fn head(&self, key: &NodeKey) -> io::Result<Option<Response>> {
-        let builder = self
-            .make_request_builder(Method::HEAD, key)
-            .map_err(|e| io::Error::new(ErrorKind::InvalidInput, "Could not make URL"))?;
-
-        match builder.send() {
-            Ok(r) => Ok(Some(r)),
-            Err(e) => {
-                if e.status().unwrap() == StatusCode::NOT_FOUND {
-                    Ok(None)
-                } else {
-                    Err(io::Error::new(ErrorKind::Other, e))
-                }
-            }
-        }
     }
 }
 
@@ -101,14 +79,17 @@ impl ReadableStore for HttpStore {
     ) -> io::Result<Vec<Option<Box<dyn io::Read>>>> {
         let mut ranges = HashMap::with_capacity(key_ranges.len());
 
+        // group ranges by the node key, storing the original index
         for (idx, (k, r)) in key_ranges.iter().enumerate() {
             ranges.entry(k).or_insert(Vec::default()).push((idx, r));
         }
 
+        // pre-allocate output vec with Nones (can't use vec![] as sizes of Some variants are unknown)
         let mut out: Vec<Option<Box<dyn Read>>> =
             repeat_with(|| None).take(key_ranges.len()).collect();
 
         for (k, idx_rs) in ranges.into_iter() {
+            // make a single request per node
             let req = "bytes=".to_string() + &idx_rs.iter().map(|(_, r)| r.to_string()).join(", ");
             let builder = self
                 .make_request_builder(Method::GET, k)
@@ -117,24 +98,31 @@ impl ReadableStore for HttpStore {
 
             if let Some(r) = map_response_err(builder.send())? {
                 let status = r.status();
+
+                // need content type first as .bytes consumes header
                 let content_type = r
                     .headers()
                     .get(reqwest::header::CONTENT_TYPE)
                     .map(|h| h.clone());
+
+                // read eagerly so that we can easily slice later
                 let bytes = r.bytes().map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
                 if status == StatusCode::PARTIAL_CONTENT {
+                    // server knows how to deal with partial content
+
                     if idx_rs.len() == 1 {
+                        // single ranges look different
                         let idx = idx_rs[0].0;
                         out[idx] = Some(Box::new(bytes.reader()) as Box<dyn Read>);
-                        continue;
-                    }
-                    if let Some(ct) = content_type {
+                    } else if let Some(ct) = content_type {
+                        // actual multi ranges
                         let bound =
                             get_boundary(ct.to_str().expect("content type was invalid str"))
                                 .expect("Invalid multipart content header");
                         let parts = split_multipart_bytes(bytes, bound)
                             .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
                         for (p, (idx, _)) in parts.into_iter().zip(idx_rs.iter()) {
                             out[*idx] = Some(Box::new(p.reader()) as Box<dyn Read>);
                         }
@@ -145,14 +133,16 @@ impl ReadableStore for HttpStore {
                         ));
                     }
                 } else if status == StatusCode::OK {
-                    for (idx, r) in idx_rs.iter() {
-                        let rdr = bytes.slice(r.to_range(bytes.len())).reader();
+                    // server doesn't know how to do partial responses, returned whole chunk
+                    for (idx, rreq) in idx_rs.iter() {
+                        let rdr = bytes.slice(rreq.to_range(bytes.len())).reader();
                         out[*idx] = Some(Box::new(rdr) as Box<dyn Read>);
                     }
                 } else {
                     return Err(io::Error::new(ErrorKind::Other, "Unknown status code"));
                 }
             } else {
+                // 404, empty chunk
                 continue;
             }
         }
@@ -162,11 +152,17 @@ impl ReadableStore for HttpStore {
 }
 
 fn get_boundary<'a>(content_type: &'a str) -> Option<&'a str> {
-    let start = "multipart/byteranges; boundary=";
-    if !content_type.starts_with(start) {
+    let mut cti = content_type.split(';').map(|s| s.trim());
+    let t = cti.next()?;
+    if t != "multipart/byteranges" {
         return None;
     }
-    Some(&content_type[start.len()..])
+    let bound = cti.next()?;
+    let mut bi = bound.split('=').map(|s| s.trim());
+    if bi.next()? != "boundary" {
+        return None;
+    }
+    bi.next()
 }
 
 fn map_response_err(response: reqwest::Result<Response>) -> io::Result<Option<Response>> {

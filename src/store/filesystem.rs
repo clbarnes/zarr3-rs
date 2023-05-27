@@ -16,6 +16,12 @@ pub struct FileSystemStore {
 }
 
 impl FileSystemStore {
+    /// Does not check or modify path.
+    pub fn new_unchecked(path: PathBuf) -> Self {
+        Self { base_path: path }
+    }
+
+    /// Canonicalizes path and checks that it is an extant directory.
     pub fn open(path: PathBuf) -> io::Result<Self> {
         let base_path = path.canonicalize()?;
         let meta = fs::metadata(&base_path)?;
@@ -29,6 +35,7 @@ impl FileSystemStore {
         }
     }
 
+    /// Canonicalizes path and checks that it is an extant directory.
     pub fn create(path: PathBuf, parents: bool) -> io::Result<Self> {
         if path.exists() {
             return Err(io::Error::new(ErrorKind::AlreadyExists, "Already exists"));
@@ -42,6 +49,7 @@ impl FileSystemStore {
         })
     }
 
+    /// Canonicalizes path and, if the directory does not exist, creates it.
     pub fn open_or_create(path: PathBuf, parents: bool) -> io::Result<Self> {
         let base_path = path.canonicalize()?;
         if base_path.exists() {
