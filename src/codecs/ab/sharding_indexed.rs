@@ -1,4 +1,7 @@
+
+use crc32c::{crc32c};
 use serde::{Deserialize, Serialize};
+
 use std::io::{BufWriter, Cursor, Read, Seek};
 use thiserror::Error;
 
@@ -345,6 +348,8 @@ pub enum ChunkSpecConstructionError {
     MalformedSpec(#[from] ChunkSpecError),
     #[error("Could not read chunk index")]
     IoError(#[from] std::io::Error),
+    #[error("Chunk spec does not match checksum")]
+    ChecksumFailure,
 }
 
 /// C order
@@ -392,7 +397,8 @@ impl ChunkSpec {
         if prod == 0 {
             Ok(Self::new_unchecked(vec![], shape))
         } else {
-            let offset = -(prod as i64) * std::mem::size_of::<ChunkAddress>() as i64;
+            let chksum_len = std::mem::size_of::<u32>() as i64;
+            let offset = -(prod as i64) * std::mem::size_of::<ChunkAddress>() as i64 - chksum_len;
             r.seek(SeekFrom::End(offset))?;
             Self::from_reader(r, shape)
         }
@@ -404,9 +410,12 @@ impl ChunkSpec {
         shape: GridCoord,
     ) -> Result<Self, ChunkSpecConstructionError> {
         let n_c_addrs: usize = shape.iter().fold(1, |acc, x| acc * *x as usize);
-        let buf_len = n_c_addrs * std::mem::size_of::<ChunkAddress>();
+        let chksum_len = std::mem::size_of::<u32>();
+        let buf_len = n_c_addrs * std::mem::size_of::<ChunkAddress>() + chksum_len;
         let mut buf = vec![u8::MAX; buf_len];
         r.read_exact(&mut buf)?;
+        let chksum_offset = buf.len() - chksum_len;
+        let chksum_calc = crc32c(&buf[..chksum_offset]);
 
         let mut c_idxs = Vec::with_capacity(n_c_addrs);
         let mut curs = Cursor::new(buf);
@@ -415,13 +424,23 @@ impl ChunkSpec {
             c_idxs.push(c);
         }
 
-        Self::new(c_idxs, shape).map_err(|e| e.into())
+        let chksum_read = curs.read_u32::<LittleEndian>()?;
+        if chksum_calc != chksum_read {
+            Self::new(c_idxs, shape).map_err(|e| e.into())
+        } else {
+            Err(ChunkSpecConstructionError::ChecksumFailure)
+        }
     }
 
     pub fn write_to<W: Write>(&self, w: &mut W) -> Result<(), std::io::Error> {
+        let mut curs = Cursor::new(Vec::default());
         for c in self.chunk_idxs.iter() {
-            c.write_to(w)?;
+            c.write_to(&mut curs)?;
         }
+        let chksum = crc32c(&curs.get_ref()[..]);
+        curs.write_u32::<LittleEndian>(chksum)?;
+        w.write_all(&curs.into_inner()[..])?;
+
         Ok(())
     }
 
