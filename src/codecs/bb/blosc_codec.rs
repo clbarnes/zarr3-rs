@@ -19,6 +19,7 @@ pub struct BloscCodec {
     pub typesize: Option<usize>,
 }
 
+// todo: replace when https://github.com/asomers/blosc-rs/pull/25 released
 fn clevel_eq(c1: Clevel, c2: Clevel) -> bool {
     match c1 {
         Clevel::None => match c2 {
@@ -64,6 +65,7 @@ fn clevel_eq(c1: Clevel, c2: Clevel) -> bool {
     }
 }
 
+// todo: replace when https://github.com/asomers/blosc-rs/pull/25 released
 fn shuffle_eq(s1: ShuffleMode, s2: ShuffleMode) -> bool {
     match s1 {
         ShuffleMode::None => match s2 {
@@ -145,18 +147,7 @@ fn clevel_to_str<S>(cname: &Clevel, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    match cname {
-        Clevel::None => serializer.serialize_u8(0),
-        Clevel::L1 => serializer.serialize_u8(1),
-        Clevel::L2 => serializer.serialize_u8(2),
-        Clevel::L3 => serializer.serialize_u8(3),
-        Clevel::L4 => serializer.serialize_u8(4),
-        Clevel::L5 => serializer.serialize_u8(5),
-        Clevel::L6 => serializer.serialize_u8(6),
-        Clevel::L7 => serializer.serialize_u8(7),
-        Clevel::L8 => serializer.serialize_u8(8),
-        Clevel::L9 => serializer.serialize_u8(9),
-    }
+    serializer.serialize_i32(*cname as i32)
 }
 
 mod shuffle {

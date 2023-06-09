@@ -8,7 +8,7 @@ use flate2::Compression as GzCompression;
 
 use crate::codecs::bb::BBCodec;
 
-#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Debug, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum GzipLevel {
     None = 0,
