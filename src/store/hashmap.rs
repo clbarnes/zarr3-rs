@@ -61,7 +61,7 @@ impl ListableStore for HashMapStore {
         let map = self.map.borrow();
         Ok(map
             .keys()
-            .filter(|k| k.is_descendant_of(prefix))
+            .filter(|k| prefix.is_ancestor_of(k))
             .cloned()
             .collect())
     }
@@ -71,7 +71,7 @@ impl ListableStore for HashMapStore {
         let mut keys = Vec::default();
         let mut prefixes: HashSet<NodeKey> = HashSet::default();
 
-        for k in map.keys().filter(|k| k.is_descendant_of(prefix)).cloned() {
+        for k in map.keys().filter(|k| prefix.is_ancestor_of(k)).cloned() {
             if k.len() == prefix.len() + 1 {
                 keys.push(k);
             } else {

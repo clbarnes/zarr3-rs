@@ -1,5 +1,4 @@
-
-use crc32c::{crc32c};
+use crc32c::crc32c;
 use serde::{Deserialize, Serialize};
 
 use std::io::{BufWriter, Cursor, Read, Seek};

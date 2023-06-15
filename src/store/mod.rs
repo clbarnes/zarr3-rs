@@ -170,7 +170,7 @@ impl NodeKey {
     }
 
     // Check whether the other key starts with this key and is longer.
-    pub fn is_descendant_of(&self, other: &NodeKey) -> bool {
+    pub fn is_ancestor_of(&self, other: &NodeKey) -> bool {
         other.len() > self.len() && self.as_ref() == &other.as_ref()[..self.len()]
     }
 
