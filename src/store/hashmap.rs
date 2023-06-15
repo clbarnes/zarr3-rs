@@ -9,7 +9,10 @@ use bytes::{
     Buf, BufMut, Bytes, BytesMut,
 };
 
-use super::{ListableStore, NodeKey, ReadableStore, Store, WriteableStore};
+use super::{
+    list_dir_from_all_keys_ref, list_prefix_from_all_keys_ref, ListableStore, NodeKey,
+    ReadableStore, Store, WriteableStore,
+};
 
 pub struct HashMapStore {
     // this locks whole map for read of single key
@@ -59,29 +62,12 @@ impl ListableStore for HashMapStore {
 
     fn list_prefix(&self, prefix: &NodeKey) -> io::Result<Vec<NodeKey>> {
         let map = self.map.borrow();
-        Ok(map
-            .keys()
-            .filter(|k| prefix.is_ancestor_of(k))
-            .cloned()
-            .collect())
+        Ok(list_prefix_from_all_keys_ref(map.keys(), prefix))
     }
 
     fn list_dir(&self, prefix: &NodeKey) -> Result<(Vec<NodeKey>, Vec<NodeKey>), std::io::Error> {
         let map = self.map.borrow();
-        let mut keys = Vec::default();
-        let mut prefixes: HashSet<NodeKey> = HashSet::default();
-
-        for k in map.keys().filter(|k| prefix.is_ancestor_of(k)).cloned() {
-            if k.len() == prefix.len() + 1 {
-                keys.push(k);
-            } else {
-                let mut value = prefix.clone();
-                value.push(k.as_slice()[value.len()].clone());
-                prefixes.insert(value);
-            }
-        }
-
-        Ok((keys, prefixes.into_iter().collect()))
+        Ok(list_dir_from_all_keys_ref(map.keys(), prefix))
     }
 }
 

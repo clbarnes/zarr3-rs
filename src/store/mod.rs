@@ -2,7 +2,7 @@ use itertools::Itertools;
 use log::warn;
 use smallvec::SmallVec;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Display,
     io::{self, Cursor, Error, Read, Write},
     str::FromStr,
@@ -312,28 +312,168 @@ pub trait ReadableStore: Store {
     // fn uri(&self, key: &NodeKey) -> Result<String, Error>;
 }
 
+/// Calculate [ListableStore::list_prefix] result from all keys.
+pub fn list_prefix_from_all_keys<I: IntoIterator<Item = NodeKey>>(
+    all_keys: I,
+    prefix: &NodeKey,
+) -> Vec<NodeKey> {
+    all_keys
+        .into_iter()
+        .filter(|k| prefix.is_ancestor_of(k))
+        .collect()
+}
+
+/// Calculate [ListableStore::list_prefix] result from all keys (as references).
+pub fn list_prefix_from_all_keys_ref<'i, I: IntoIterator<Item = &'i NodeKey>>(
+    all_keys: I,
+    prefix: &NodeKey,
+) -> Vec<NodeKey> {
+    all_keys
+        .into_iter()
+        .filter(|k| prefix.is_ancestor_of(k))
+        .cloned()
+        .collect()
+}
+
+/// Calculate [ListableStore::list_prefix] result using [ListableStore::list_dir]
+pub fn list_prefix_from_list_dir(
+    store: &impl ListableStore,
+    key: &NodeKey,
+) -> Result<Vec<NodeKey>, Error> {
+    let mut to_visit = Vec::default();
+    to_visit.push(key.clone());
+    let mut result = Vec::default();
+
+    while let Some(next) = to_visit.pop() {
+        let dir = store.list_dir(&next)?;
+        result.extend(dir.0);
+        to_visit.extend(dir.1);
+    }
+
+    Ok(result)
+}
+
+/// Calculate [ListableStore::list_dir] result from all keys.
+pub fn list_dir_from_all_keys<I: IntoIterator<Item = NodeKey>>(
+    all_keys: I,
+    key: &NodeKey,
+) -> (Vec<NodeKey>, Vec<NodeKey>) {
+    let mut keys = Vec::default();
+    let mut prefix_names: HashSet<NodeName> = HashSet::default();
+    for k in all_keys.into_iter().filter(|k| key.is_ancestor_of(k)) {
+        if k.len() == key.len() + 1 {
+            keys.push(k);
+        } else {
+            let name = k.as_slice().get(key.len()).unwrap();
+            if prefix_names.contains(&name) {
+                continue;
+            }
+            prefix_names.insert(name.clone());
+        }
+    }
+
+    let prefixes = prefix_names
+        .into_iter()
+        .map(|n| {
+            let mut k = key.clone();
+            k.push(n);
+            k
+        })
+        .collect();
+
+    (keys, prefixes)
+}
+
+/// Calculate [ListableStore::list_dir] result from all keys (as references).
+pub fn list_dir_from_all_keys_ref<'i, I: IntoIterator<Item = &'i NodeKey>>(
+    all_keys: I,
+    key: &NodeKey,
+) -> (Vec<NodeKey>, Vec<NodeKey>) {
+    let mut keys = Vec::default();
+    let mut prefix_names: HashSet<NodeName> = HashSet::default();
+    for k in all_keys.into_iter().filter(|k| key.is_ancestor_of(k)) {
+        if k.len() == key.len() + 1 {
+            keys.push(k.clone());
+        } else {
+            let name = k.as_slice().get(key.len()).unwrap();
+            if prefix_names.contains(&name) {
+                continue;
+            }
+            prefix_names.insert(name.clone());
+        }
+    }
+
+    let prefixes = prefix_names
+        .into_iter()
+        .map(|n| {
+            let mut k = key.clone();
+            k.push(n);
+            k
+        })
+        .collect();
+
+    (keys, prefixes)
+}
+
+/// Calculate [ListableStore::list_dir] result using [ListableStore::list_prefix]
+pub fn list_dir_from_list_prefix(
+    store: &impl ListableStore,
+    key: &NodeKey,
+) -> Result<(Vec<NodeKey>, Vec<NodeKey>), Error> {
+    let mut keys = Vec::default();
+    let mut prefix_names: HashSet<NodeName> = HashSet::default();
+
+    for k in store.list_prefix(key)?.into_iter() {
+        if k.len() == key.len() + 1 {
+            keys.push(k);
+        } else {
+            let name = k.as_slice().get(key.len()).unwrap();
+            if prefix_names.contains(&name) {
+                continue;
+            }
+            prefix_names.insert(name.clone());
+        }
+    }
+
+    let prefixes = prefix_names
+        .into_iter()
+        .map(|n| {
+            let mut k = key.clone();
+            k.push(n);
+            k
+        })
+        .collect();
+
+    Ok((keys, prefixes))
+}
+
+/// Calculate [ListableStore::list] result using [ListableStore::list_prefix]
+pub fn list_from_list_prefix(store: &impl ListableStore) -> Result<Vec<NodeKey>, Error> {
+    store.list_prefix(&NodeKey::default())
+}
+
 pub trait ListableStore: Store {
     /// Retrieve all keys in the store.
-    fn list(&self) -> Result<Vec<NodeKey>, Error> {
-        self.list_prefix(&NodeKey::default())
-    }
+    ///
+    /// If this store has an efficient [ListableStore::list_prefix] implementation,
+    /// consider implementing this method using [list_from_list_prefix].
+    fn list(&self) -> Result<Vec<NodeKey>, Error>;
 
     /// Retrieve all keys with a given prefix.
-    fn list_prefix(&self, key: &NodeKey) -> Result<Vec<NodeKey>, Error> {
-        let mut to_visit = vec![key.clone()];
-        let mut result = vec![];
-
-        while let Some(next) = to_visit.pop() {
-            let dir = self.list_dir(&next)?;
-            result.extend(dir.0);
-            to_visit.extend(dir.1);
-        }
-
-        Ok(result)
-    }
+    ///
+    /// If this store has an efficient [ListableStore::list_dir] implementation,
+    /// consider implementing this method using [list_prefix_from_list_dir].
+    /// If this must be calculated via a call to [ListableStore::list],
+    /// consider implementing this method using [list_prefix_from_list].
+    fn list_prefix(&self, key: &NodeKey) -> Result<Vec<NodeKey>, Error>;
 
     /// Retrieve all keys and prefixes with a given prefix and which do not
     /// contain the character “/” after the given prefix.
+    ///
+    /// If this store has an efficient [ListableStore::list_prefix] implementation,
+    /// consider implementing this method using [list_dir_from_list_prefix].
+    /// If this must be implemented via a call to [ListableStore::list],
+    /// consider implementing this method using [list_dir_from_list].
     fn list_dir(&self, prefix: &NodeKey) -> Result<(Vec<NodeKey>, Vec<NodeKey>), Error>;
 }
 

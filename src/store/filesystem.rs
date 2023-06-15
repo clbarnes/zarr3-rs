@@ -8,7 +8,10 @@ use fs4::FileExt;
 use log::warn;
 use walkdir::WalkDir;
 
-use super::{ListableStore, NodeKey, NodeName, ReadableStore, Store, WriteableStore};
+use super::{
+    list_from_list_prefix, list_prefix_from_list_dir, ListableStore, NodeKey, NodeName,
+    ReadableStore, Store, WriteableStore,
+};
 use crate::RangeRequest;
 
 pub struct FileSystemStore {
@@ -119,6 +122,15 @@ impl ReadableStore for FileSystemStore {
 }
 
 impl ListableStore for FileSystemStore {
+    fn list(&self) -> Result<Vec<NodeKey>, io::Error> {
+        list_from_list_prefix(self)
+    }
+
+    fn list_prefix(&self, key: &NodeKey) -> Result<Vec<NodeKey>, io::Error> {
+        // todo: more efficient to use walkdir?
+        list_prefix_from_list_dir(self, key)
+    }
+
     fn list_dir(&self, prefix: &NodeKey) -> Result<(Vec<NodeKey>, Vec<NodeKey>), io::Error> {
         // This may be inconsistent with other implementations if a directory tree has no files in it.
         // Directories are not prefixes unless there is a file somewhere beneath them.
@@ -133,7 +145,7 @@ impl ListableStore for FileSystemStore {
             let name = if let Some(n) = fname.to_str() {
                 n
             } else {
-                warn!("Skipping file with non-UTF8 name");
+                warn!("Skipping node with non-UTF8 name: {:?}", fname);
                 continue;
             };
             match name.parse::<NodeName>() {
@@ -154,8 +166,6 @@ impl ListableStore for FileSystemStore {
 
         Ok((keys, prefixes))
     }
-
-    // todo: more efficient prefix listing with walkdir?
 }
 
 impl Store for FileSystemStore {}
