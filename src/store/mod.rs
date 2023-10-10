@@ -21,7 +21,7 @@ pub mod http;
 
 const NODE_KEY_SIZE: usize = 10;
 const METADATA_NAME: &str = "zarr.json";
-pub(crate) const KEY_SEP: &'static str = "/";
+pub(crate) const KEY_SEP: &str = "/";
 
 fn metadata_name() -> NodeName {
     METADATA_NAME.parse().unwrap()

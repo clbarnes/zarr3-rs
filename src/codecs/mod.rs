@@ -37,7 +37,7 @@ impl CodecChain {
     ) -> Self {
         Self {
             aa_codecs,
-            ab_codec: ab_codec,
+            ab_codec,
             bb_codecs,
         }
     }
