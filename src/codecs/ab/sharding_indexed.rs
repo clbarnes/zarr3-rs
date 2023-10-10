@@ -15,42 +15,6 @@ use std::io::{SeekFrom, Write};
 
 use super::{ABCodec, ABCodecType};
 
-#[derive(Error, Debug)]
-#[error("Got {other_ndim} dimensions when expecting {ref_ndim}")]
-pub struct DimensionMismatch {
-    ref_ndim: usize,
-    other_ndim: usize,
-}
-
-impl DimensionMismatch {
-    pub fn check_coords(coord_ndim: usize, array_ndim: usize) -> Result<(), Self> {
-        if coord_ndim == array_ndim {
-            Ok(())
-        } else {
-            Err(Self {
-                ref_ndim: coord_ndim,
-                other_ndim: array_ndim,
-            })
-        }
-    }
-
-    pub fn check_many(reference: usize, others: &[usize]) -> Result<(), Self> {
-        for o in others.iter() {
-            if o != &reference {
-                return Err(Self {
-                    ref_ndim: reference,
-                    other_ndim: *o,
-                });
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Panic if any dimensions mismatch.
-pub fn dimpanic(reference: usize, others: &[usize]) {
-    DimensionMismatch::check_many(reference, others).unwrap()
-}
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ShardingIndexedCodec {

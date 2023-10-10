@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 /// For an enum where some variants contain data and some do not,
 /// serializes a given no-data variant as a string of its name.
 ///
@@ -49,4 +51,41 @@ macro_rules! variant_from_data {
             }
         }
     };
+}
+
+#[derive(Error, Debug)]
+#[error("Got {other_ndim} dimensions when expecting {ref_ndim}")]
+pub struct DimensionMismatch {
+    ref_ndim: usize,
+    other_ndim: usize,
+}
+
+impl DimensionMismatch {
+    pub fn check_coords(coord_ndim: usize, array_ndim: usize) -> Result<(), Self> {
+        if coord_ndim == array_ndim {
+            Ok(())
+        } else {
+            Err(Self {
+                ref_ndim: coord_ndim,
+                other_ndim: array_ndim,
+            })
+        }
+    }
+
+    pub fn check_many(reference: usize, others: &[usize]) -> Result<(), Self> {
+        for o in others.iter() {
+            if o != &reference {
+                return Err(Self {
+                    ref_ndim: reference,
+                    other_ndim: *o,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Panic if any dimensions mismatch.
+pub fn dimpanic(reference: usize, others: &[usize]) {
+    DimensionMismatch::check_many(reference, others).unwrap()
 }

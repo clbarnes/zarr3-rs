@@ -2,8 +2,7 @@ use ndarray::{IxDyn, SliceInfo, SliceInfoElem};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    chunk_arr::PartialChunkIter, codecs::ab::sharding_indexed::DimensionMismatch, CoordVec,
-    GridCoord, MaybeNdim, Ndim,
+    chunk_arr::PartialChunkIter, util::DimensionMismatch, CoordVec, GridCoord, MaybeNdim, Ndim,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType},
-    codecs::ab::sharding_indexed::DimensionMismatch,
     to_usize,
+    util::DimensionMismatch,
 };
 use crate::{
     chunk_key_encoding::{ChunkKeyEncoder, ChunkKeyEncoding},
