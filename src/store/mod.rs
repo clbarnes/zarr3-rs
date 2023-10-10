@@ -61,7 +61,12 @@ impl NodeName {
                 return Err(InvalidNodeName::HasSlash);
             }
 
-            if !has_non_recommended && !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
+            if !has_non_recommended
+                && !c.is_ascii_alphanumeric()
+                && c != '-'
+                && c != '_'
+                && c != '.'
+            {
                 has_non_recommended = true;
                 warn!("Node name has non-recommended character `{}`; prefer `a-z`, `A-Z`, `0-9`, `-`, `_`, `.`", c);
             }
@@ -98,8 +103,7 @@ impl FromStr for NodeName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct NodeKey(SmallVec<[NodeName; NODE_KEY_SIZE]>);
 
 #[derive(thiserror::Error, Debug)]
@@ -142,6 +146,10 @@ impl NodeKey {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Pop the last key component.
@@ -240,8 +248,6 @@ impl FromStr for NodeKey {
     }
 }
 
-
-
 impl AsRef<[NodeName]> for NodeKey {
     fn as_ref(&self) -> &[NodeName] {
         &self.0
@@ -289,11 +295,13 @@ pub trait ReadableStore: Store {
                     Err(e) => Err(e),
                 }?;
             }
-            let rd = bufs.get(key).unwrap().as_ref().map(|b| Box::new(Cursor::new(
+            let rd = bufs.get(key).unwrap().as_ref().map(|b| {
+                Box::new(Cursor::new(
                     // todo: unnecessary clone?
                     // consider bytes::Bytes
                     range.slice(b.as_slice()).to_vec(),
-                )) as Box<dyn Read>);
+                )) as Box<dyn Read>
+            });
             out.push(rd);
         }
         Ok(out)

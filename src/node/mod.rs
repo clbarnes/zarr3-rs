@@ -88,10 +88,7 @@ impl ReadableMetadata for Metadata {
     }
 
     fn is_array(&self) -> bool {
-        match self {
-            Self::Array(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::Array(_))
     }
 
     fn get_attributes(&self) -> &JsonObject {
