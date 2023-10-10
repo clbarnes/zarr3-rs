@@ -29,10 +29,10 @@ impl FileSystemStore {
         let base_path = path.canonicalize()?;
         let meta = fs::metadata(&base_path)?;
         if meta.is_file() {
-            return Err(io::Error::new(
+            Err(io::Error::new(
                 ErrorKind::Other,
                 "Path exists, but it is a file",
-            ));
+            ))
         } else {
             Ok(Self { base_path })
         }
@@ -82,7 +82,7 @@ impl FileSystemStore {
 
     fn file_reader(&self, key: &NodeKey) -> io::Result<Option<File>> {
         let target = self.get_path(key);
-        match File::open(&target) {
+        match File::open(target) {
             Ok(f) => {
                 f.lock_shared()?;
                 Ok(Some(f))
@@ -98,7 +98,7 @@ impl ReadableStore for FileSystemStore {
     type Readable = File;
 
     fn get(&self, key: &NodeKey) -> Result<Option<Self::Readable>, io::Error> {
-        Ok(self.file_reader(key)?)
+        self.file_reader(key)
     }
 
     fn get_partial_values(

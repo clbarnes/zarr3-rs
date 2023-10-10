@@ -100,7 +100,7 @@ impl<'s, S: Store> Group<'s, S> {
 
 impl<'s, S: ReadableStore> Group<'s, S> {
     pub(crate) fn read_meta(&mut self) -> io::Result<()> {
-        if let Some(r) = self.store.get(&self.meta_key())? {
+        if let Some(r) = self.store.get(self.meta_key())? {
             let meta: GroupMetadata = serde_json::from_reader(r).expect("deser error");
             self.metadata = meta;
             Ok(())
@@ -156,9 +156,10 @@ impl<'s, S: ListableStore> Group<'s, S> {
 
 impl<'s, S: WriteableStore> Group<'s, S> {
     pub(crate) fn write_meta(&self) -> io::Result<()> {
-        self.store.set(&self.meta_key, |mut w| {
-            Ok(serde_json::to_writer_pretty(&mut w, &self.metadata)
-                .expect("could not serialise metadata"))
+        self.store.set(&self.meta_key, |w| {
+            serde_json::to_writer_pretty(w, &self.metadata)
+            .expect("could not serialise metadata");
+            Ok(())
         })
     }
 

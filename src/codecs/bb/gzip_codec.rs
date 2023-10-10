@@ -57,7 +57,7 @@ mod level {
         D: Deserializer<'de>,
     {
         let lvl: u32 = Deserialize::deserialize(deserializer)?;
-        GzipLevel::try_from(lvl).map_err(|e| serde::de::Error::custom(e))
+        GzipLevel::try_from(lvl).map_err(serde::de::Error::custom)
     }
 
     pub fn serialize<S>(level: &GzipLevel, serializer: S) -> Result<S::Ok, S::Error>

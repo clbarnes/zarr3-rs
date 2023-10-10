@@ -161,10 +161,7 @@ impl ArrayMetadata {
 
     /// Ensures that all unknown extensions do not require understanding.
     pub fn try_understand_extensions(&self) -> Result<(), &'static str> {
-        self.extensions
-            .iter()
-            .map(|(_name, config)| config.try_understand())
-            .collect()
+        self.extensions.values().try_for_each(|config| config.try_understand())
     }
 
     /// Ensure that all dimensioned metadata is consistent.
@@ -463,12 +460,12 @@ impl<'s, S: Store, T: ReflectedType> Array<'s, S, T> {
     }
 
     fn chunk_repr(&self, chunk_idx: &GridCoord) -> ArrayRepr<T> {
-        let shape = self.metadata.chunk_grid.chunk_shape(&chunk_idx);
+        let shape = self.metadata.chunk_grid.chunk_shape(chunk_idx);
         ArrayRepr::new(shape.as_slice(), self.fill_value)
     }
 
     fn empty_chunk(&self, chunk_idx: &GridCoord) -> Result<ArcArrayD<T>, &'static str> {
-        let shape = self.metadata.chunk_grid.chunk_shape(&chunk_idx);
+        let shape = self.metadata.chunk_grid.chunk_shape(chunk_idx);
 
         let arr = ArcArrayD::from_elem(
             shape.into_iter().map(|s| s as usize).collect::<Vec<_>>(),
@@ -507,9 +504,9 @@ impl<'s, S: ReadableStore, T: ReflectedType> Array<'s, S, T> {
         let key = self
             .metadata
             .chunk_key_encoding
-            .chunk_key(&self.key, &chunk_idx);
+            .chunk_key(&self.key, chunk_idx);
         if let Some(r) = self.store.get(&key)? {
-            let arr = self.metadata.codecs.decode(r, self.chunk_repr(&chunk_idx));
+            let arr = self.metadata.codecs.decode(r, self.chunk_repr(chunk_idx));
             Ok(Some(arr))
         } else {
             Ok(Some(self.empty_chunk(chunk_idx).expect("wrong data type")))
@@ -557,14 +554,15 @@ impl<'s, S: ListableStore, T: ReflectedType> Array<'s, S, T> {
 
 impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
     pub(crate) fn write_meta(&self) -> io::Result<()> {
-        let _w = self.store.set(&self.meta_key, |mut w| {
-            Ok(serde_json::to_writer_pretty(&mut w, &self.metadata).unwrap())
+        self.store.set(&self.meta_key, |w| {
+            serde_json::to_writer_pretty(w, &self.metadata).unwrap();
+            Ok(())
         })?;
         Ok(())
     }
 
     pub fn write_chunk(&self, idx: &GridCoord, chunk: ArcArrayD<T>) -> Result<(), &'static str> {
-        let shape = self.metadata.chunk_grid.chunk_shape(&idx);
+        let shape = self.metadata.chunk_grid.chunk_shape(idx);
         if chunk
             .shape()
             .iter()
@@ -583,8 +581,9 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
         }
 
         self.store
-            .set(&key, move |mut w| {
-                Ok(self.metadata.codecs.encode(chunk, &mut w))
+            .set(&key, move |w| {
+                self.metadata.codecs.encode(chunk, w);
+                Ok(())
             })
             .map_err(|_| "Could not get chunk writer")
     }

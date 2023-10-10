@@ -15,7 +15,7 @@ pub(crate) struct CIter {
 
 impl CIter {
     pub fn new(shape: GridCoord) -> Self {
-        let next = if shape.len() == 0 || shape.iter().any(|s| 0 == *s) {
+        let next = if shape.is_empty() || shape.iter().any(|s| 0 == *s) {
             None
         } else {
             Some(smallvec![0; shape.len()])
@@ -45,9 +45,7 @@ impl Iterator for CIter {
     }
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next.is_none() {
-            return None;
-        }
+        self.next.as_ref()?;
         self.count += 1;
 
         let curr = self.next.clone();

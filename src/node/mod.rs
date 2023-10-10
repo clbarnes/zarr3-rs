@@ -23,7 +23,7 @@ pub trait ReadableMetadata {
 
     // todo: is it worth having this?
     fn get_attribute_value(&self, key: &str) -> Option<serde_json::Value> {
-        self.get_attributes().get(key).map(|v| v.clone())
+        self.get_attributes().get(key).cloned()
     }
 
     fn get_attribute<D: DeserializeOwned>(
@@ -122,7 +122,7 @@ mod tests {
     use super::*;
 
     // from the spec, although with "extensions" removed
-    const EXAMPLE_ARRAY_META: &'static str = r#"
+    const EXAMPLE_ARRAY_META: &str = r#"
         {
             "zarr_format": 3,
             "node_type": "array",
@@ -157,7 +157,7 @@ mod tests {
     "#;
 
     // as above, minus array-specific keys
-    const EXAMPLE_GROUP_META: &'static str = r#"
+    const EXAMPLE_GROUP_META: &str = r#"
         {
             "zarr_format": 3,
             "node_type": "group",

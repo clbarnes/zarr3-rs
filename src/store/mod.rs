@@ -61,11 +61,9 @@ impl NodeName {
                 return Err(InvalidNodeName::HasSlash);
             }
 
-            if !has_non_recommended {
-                if !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
-                    has_non_recommended = true;
-                    warn!("Node name has non-recommended character `{}`; prefer `a-z`, `A-Z`, `0-9`, `-`, `_`, `.`", c);
-                }
+            if !has_non_recommended && !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
+                has_non_recommended = true;
+                warn!("Node name has non-recommended character `{}`; prefer `a-z`, `A-Z`, `0-9`, `-`, `_`, `.`", c);
             }
 
             len += 1;
@@ -101,6 +99,7 @@ impl FromStr for NodeName {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub struct NodeKey(SmallVec<[NodeName; NODE_KEY_SIZE]>);
 
 #[derive(thiserror::Error, Debug)]
@@ -237,15 +236,11 @@ impl FromStr for NodeKey {
         for n in s.split(KEY_SEP) {
             k.push(NodeName::new(n.to_owned())?);
         }
-        return Ok(k);
+        Ok(k)
     }
 }
 
-impl Default for NodeKey {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
+
 
 impl AsRef<[NodeName]> for NodeKey {
     fn as_ref(&self) -> &[NodeName] {
@@ -294,15 +289,11 @@ pub trait ReadableStore: Store {
                     Err(e) => Err(e),
                 }?;
             }
-            let rd = if let Some(b) = bufs.get(key).unwrap() {
-                Some(Box::new(Cursor::new(
+            let rd = bufs.get(key).unwrap().as_ref().map(|b| Box::new(Cursor::new(
                     // todo: unnecessary clone?
                     // consider bytes::Bytes
                     range.slice(b.as_slice()).to_vec(),
-                )) as Box<dyn Read>)
-            } else {
-                None
-            };
+                )) as Box<dyn Read>);
             out.push(rd);
         }
         Ok(out)
@@ -365,7 +356,7 @@ pub fn list_dir_from_all_keys<I: IntoIterator<Item = NodeKey>>(
             keys.push(k);
         } else {
             let name = k.as_slice().get(key.len()).unwrap();
-            if prefix_names.contains(&name) {
+            if prefix_names.contains(name) {
                 continue;
             }
             prefix_names.insert(name.clone());
@@ -396,7 +387,7 @@ pub fn list_dir_from_all_keys_ref<'i, I: IntoIterator<Item = &'i NodeKey>>(
             keys.push(k.clone());
         } else {
             let name = k.as_slice().get(key.len()).unwrap();
-            if prefix_names.contains(&name) {
+            if prefix_names.contains(name) {
                 continue;
             }
             prefix_names.insert(name.clone());
@@ -428,7 +419,7 @@ pub fn list_dir_from_list_prefix(
             keys.push(k);
         } else {
             let name = k.as_slice().get(key.len()).unwrap();
-            if prefix_names.contains(&name) {
+            if prefix_names.contains(name) {
                 continue;
             }
             prefix_names.insert(name.clone());

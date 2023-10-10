@@ -318,7 +318,7 @@ impl Display for DataType {
     }
 }
 
-fn split_str_num<'a>(s: &'a str) -> (&'a str, Option<usize>) {
+fn split_str_num(s: &str) -> (&str, Option<usize>) {
     let clos = |c: char| c.is_ascii_digit();
     if let Some(idx) = s.find(clos) {
         (
@@ -465,7 +465,7 @@ impl ReflectedType for bool {
     }
 
     fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        Box::new(|buf: &mut [u8]| if buf[0] == 0 { false } else { true })
+        Box::new(|buf: &mut [u8]| buf[0] != 0)
     }
 }
 
@@ -622,10 +622,10 @@ mod tests {
             (r#""r128""#, Raw(128)),
         ];
         for (s, expected) in strs {
-            let dt: DataType = serde_json::from_str(s).expect(&format!("Couldn't parse '{}'", s));
+            let dt: DataType = serde_json::from_str(s).unwrap_or_else(|_| panic!("Couldn't parse '{}'", s));
             assert_eq!(dt, expected, "Got {:?}, expected {:?}", dt, expected);
 
-            let s2 = serde_json::to_string(&dt).expect(&format!("Couldn't serialize {:?}", dt));
+            let s2 = serde_json::to_string(&dt).unwrap_or_else(|_| panic!("Couldn't serialize {:?}", dt));
             assert_eq!(s, &s2, "Got {:?}, expected {:?}", s2, s);
         }
     }
@@ -636,7 +636,7 @@ mod tests {
 
         let s = r#"{"name":"newtype","fallback":"uint8"}"#;
         let dt: ExtensibleDataType =
-            serde_json::from_str(s).expect(&format!("Couldn't parse '{}'", s));
+            serde_json::from_str(s).unwrap_or_else(|_| panic!("Couldn't parse '{}'", s));
         match &dt {
             Unknown(d) => assert_eq!(d.name, "newtype"),
             _ => panic!("got wrong dtype"),

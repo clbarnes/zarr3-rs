@@ -133,15 +133,15 @@ impl ArrayRegion {
     }
 }
 
-impl Into<SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn>> for ArrayRegion {
-    fn into(self) -> SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
-        (&self).into()
+impl From<ArrayRegion> for SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
+    fn from(val: ArrayRegion) -> Self {
+        (&val).into()
     }
 }
 
-impl Into<SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn>> for &ArrayRegion {
-    fn into(self) -> SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
-        let indices: Vec<_> = self
+impl From<&ArrayRegion> for SliceInfo<Vec<SliceInfoElem>, IxDyn, IxDyn> {
+    fn from(val: &ArrayRegion) -> Self {
+        let indices: Vec<_> = val
             .0
             .iter()
             .map(|sl| SliceInfoElem::Slice {

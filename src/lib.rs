@@ -47,15 +47,15 @@ pub trait MaybeNdim {
         if let Some(n1) = self.maybe_ndim() {
             if let Some(n2) = other.maybe_ndim() {
                 if n1 == n2 {
-                    return Ok(Some(n1));
+                    Ok(Some(n1))
                 } else {
-                    return Err("Inconsistent dimensionalities");
+                    Err("Inconsistent dimensionalities")
                 }
             } else {
-                return Ok(Some(n1));
+                Ok(Some(n1))
             }
         } else {
-            return Ok(other.maybe_ndim());
+            Ok(other.maybe_ndim())
         }
     }
 

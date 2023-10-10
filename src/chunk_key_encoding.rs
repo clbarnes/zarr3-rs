@@ -153,8 +153,8 @@ mod tests {
 
         for s in to_deser.into_iter() {
             let c: ChunkKeyEncoding =
-                serde_json::from_str(s).expect(&format!("Could not deser {s}"));
-            let s2 = serde_json::to_string(&c).expect(&format!("Could not ser {c:?}"));
+                serde_json::from_str(s).unwrap_or_else(|_| panic!("Could not deser {s}"));
+            let s2 = serde_json::to_string(&c).unwrap_or_else(|_| panic!("Could not ser {c:?}"));
             assert_eq!(s, &s2); // might depend on spaces
         }
     }
@@ -179,7 +179,7 @@ mod tests {
 
         for (s, expected) in to_deser.into_iter() {
             let c: ChunkKeyEncoding =
-                serde_json::from_str(s).expect(&format!("Could not deser {s}"));
+                serde_json::from_str(s).unwrap_or_else(|_| panic!("Could not deser {s}"));
             assert_eq!(c, expected);
         }
     }
