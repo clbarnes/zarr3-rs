@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub mod endian;
 pub mod sharding_indexed;
 use endian::EndianCodec;
-use sharding_indexed::ShardingIndexedCodec;
+// use sharding_indexed::ShardingIndexedCodec;
 
 use super::ArrayRepr;
 
@@ -38,21 +38,21 @@ pub enum ABCodecType {
     Endian(EndianCodec),
     // box is necessary as sharding codec contains codecs,
     // so it's a recursive enum of potentially infinite size
-    ShardingIndexed(Box<ShardingIndexedCodec>),
+    // ShardingIndexed(Box<ShardingIndexedCodec>),
 }
 
 impl ABCodec for ABCodecType {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         match self {
             Self::Endian(c) => c.encode(decoded, w),
-            Self::ShardingIndexed(c) => c.encode(decoded, w),
+            // Self::ShardingIndexed(c) => c.encode(decoded, w),
         }
     }
 
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         match self {
             Self::Endian(c) => c.decode(r, decoded_repr),
-            Self::ShardingIndexed(c) => c.decode(r, decoded_repr),
+            // Self::ShardingIndexed(c) => c.decode(r, decoded_repr),
         }
     }
 }
@@ -61,7 +61,7 @@ impl MaybeNdim for ABCodecType {
     fn maybe_ndim(&self) -> Option<usize> {
         match self {
             Self::Endian(c) => c.maybe_ndim(),
-            Self::ShardingIndexed(c) => c.maybe_ndim(),
+            // Self::ShardingIndexed(c) => c.maybe_ndim(),
         }
     }
 }
@@ -74,8 +74,8 @@ impl Default for ABCodecType {
 
 variant_from_data!(ABCodecType, Endian, EndianCodec);
 
-impl From<ShardingIndexedCodec> for ABCodecType {
-    fn from(c: ShardingIndexedCodec) -> Self {
-        Self::ShardingIndexed(Box::new(c))
-    }
-}
+// impl From<ShardingIndexedCodec> for ABCodecType {
+//     fn from(c: ShardingIndexedCodec) -> Self {
+//         Self::ShardingIndexed(Box::new(c))
+//     }
+// }

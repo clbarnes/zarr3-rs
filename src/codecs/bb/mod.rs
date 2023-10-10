@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
 
 use crate::{variant_from_data, MaybeNdim};
+pub mod crc32c_codec;
 
 #[cfg(feature = "blosc")]
 pub mod blosc_codec;
@@ -23,6 +24,7 @@ pub enum BBCodecType {
     Blosc(blosc_codec::BloscCodec),
     #[cfg(feature = "gzip")]
     Gzip(gzip_codec::GzipCodec),
+    Crc32c(crc32c_codec::Crc32cCodec),
 }
 
 impl MaybeNdim for BBCodecType {
@@ -39,6 +41,8 @@ impl BBCodec for BBCodecType {
 
             #[cfg(feature = "blosc")]
             Self::Blosc(c) => c.encoder(w),
+
+            Self::Crc32c(c) => c.encoder(w),
         }
     }
 
@@ -49,6 +53,7 @@ impl BBCodec for BBCodecType {
 
             #[cfg(feature = "blosc")]
             Self::Blosc(c) => c.decoder(r),
+            Self::Crc32c(c) => c.decoder(r),
         }
     }
 }
@@ -97,3 +102,5 @@ variant_from_data!(BBCodecType, Gzip, gzip_codec::GzipCodec);
 
 #[cfg(feature = "blosc")]
 variant_from_data!(BBCodecType, Blosc, blosc_codec::BloscCodec);
+
+variant_from_data!(BBCodecType, Crc32c, crc32c_codec::Crc32cCodec);
