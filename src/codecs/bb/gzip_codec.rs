@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use thiserror::Error;
 
 use flate2::read::GzDecoder;
@@ -113,12 +113,26 @@ impl Default for GzipCodec {
 }
 
 impl BBCodec for GzipCodec {
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
-        Box::new(GzEncoder::new(w, GzCompression::new(self.level as u32)))
+    // fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
+    //     Box::new(GzEncoder::new(w, GzCompression::new(self.level as u32)))
+    // }
+
+    // fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
+    //     Box::new(GzDecoder::new(r))
+    // }
+
+    fn decode(&self, encoded: &[u8]) -> bytes::Bytes {
+        let mut out = Vec::default();
+        GzDecoder::new(encoded).read_to_end(&mut out).unwrap();
+        bytes::Bytes::from(out)
     }
 
-    fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
-        Box::new(GzDecoder::new(r))
+    fn encode(&self, decoded: &[u8]) -> bytes::Bytes {
+        let mut curs = Cursor::new(Vec::default());
+        GzEncoder::new(curs, GzCompression::new(self.level as u32))
+            .write_all(decoded)
+            .unwrap();
+        bytes::Bytes::from(curs.into_inner())
     }
 }
 

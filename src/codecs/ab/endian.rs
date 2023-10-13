@@ -1,7 +1,8 @@
 use crate::{codecs::ArrayRepr, ArcArrayD, CoordVec, MaybeNdim};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 
 use super::ABCodec;
 use crate::data_type::ReflectedType;
@@ -57,15 +58,17 @@ impl EndianCodec {
 }
 
 impl ABCodec for EndianCodec {
-    fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
+    fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> Bytes {
+        let mut w = Cursor::new(Vec::default());
         T::write_array_to(decoded, w, self.endian).unwrap();
+        Bytes::from(w.into_inner())
     }
 
-    fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
+    fn decode<T: ReflectedType>(&self, encoded: &[u8], decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         if &T::ZARR_TYPE != decoded_repr.data_type() {
             panic!("Decoded array is not of the reflected type");
         }
         let shape: CoordVec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
-        T::read_array_from(r, self.endian, shape.as_slice())
+        T::read_array_from(encoded, self.endian, shape.as_slice())
     }
 }

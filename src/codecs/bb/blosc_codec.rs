@@ -356,11 +356,26 @@ impl<W: Write> Write for BloscWriter<W> {
 }
 
 impl BBCodec for BloscCodec {
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
-        Box::new(BloscWriter::new(self, w))
+    // fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
+    //     Box::new(BloscWriter::new(self, w))
+    // }
+
+    // fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
+    //     Box::new(BloscReader::new(r))
+    // }
+
+    fn decode(&self, encoded: &[u8]) -> bytes::Bytes {
+        let ctx: Context = self.try_into().expect("Blosc codec not enabled");
+        // This is technically unsafe because decompressing any untrusted byte stream is.
+        // However, we're not changing data types so this is better than most.
+        let buf = unsafe { decompress_bytes(encoded) }.unwrap();
+        bytes::Bytes::from(buf)
+        // let mut w = Cursor::new(Vec::default());
+        // BloscWriter::new(self, w)
     }
 
-    fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
-        Box::new(BloscReader::new(r))
+    fn encode(&self, decoded: &[u8]) -> bytes::Bytes {
+        let ctx: Context = self.try_into().expect("Blosc codec not enabled");
+        bytes::Bytes::from(ctx.compress(decoded).as_ref())
     }
 }

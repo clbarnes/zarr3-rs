@@ -1,5 +1,4 @@
-use std::io::{Read, Write};
-
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::{variant_from_data, MaybeNdim};
@@ -11,9 +10,9 @@ pub mod gzip_codec;
 
 /// Common interface for compressing writers and decompressing readers.
 pub trait BBCodec {
-    fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a>;
+    fn decode(&self, encoded: &[u8]) -> Bytes;
 
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a>;
+    fn encode(&self, decoded: &[u8]) -> Bytes;
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -32,60 +31,60 @@ impl MaybeNdim for BBCodecType {
 }
 
 impl BBCodec for BBCodecType {
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
+    fn encode(&self, decoded: &[u8]) -> Bytes {
         match self {
             #[cfg(feature = "gzip")]
-            Self::Gzip(c) => c.encoder(w),
+            Self::Gzip(c) => c.encode(decoded),
 
             #[cfg(feature = "blosc")]
-            Self::Blosc(c) => c.encoder(w),
+            Self::Blosc(c) => c.encode(decoded),
         }
     }
 
-    fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
+    fn decode(&self, encoded: &[u8]) -> Bytes {
         match self {
             #[cfg(feature = "gzip")]
-            Self::Gzip(c) => c.decoder(r),
+            Self::Gzip(c) => c.decode(encoded),
 
             #[cfg(feature = "blosc")]
-            Self::Blosc(c) => c.decoder(r),
+            Self::Blosc(c) => c.decode(encoded),
         }
     }
 }
 
 impl BBCodec for &[BBCodecType] {
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
+    fn encode(&self, decoded: &[u8]) -> Bytes {
         // todo: must be a better way
         let mut it = self.iter();
 
         let mut out;
 
         if let Some(c) = it.next() {
-            out = c.encoder(w);
+            out = c.encode(decoded);
         } else {
-            return Box::new(w);
+            return Bytes::from(decoded);
         }
 
         for c in it {
-            out = c.encoder(out);
+            out = c.encode(&out[..]);
         }
 
         out
     }
 
-    fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
+    fn decode(&self, encoded: &[u8]) -> Bytes {
         let mut it = self.iter().rev();
 
         let mut out;
 
         if let Some(c) = it.next() {
-            out = c.decoder(r);
+            out = c.decode(encoded);
         } else {
-            return Box::new(r);
+            return Bytes::from(encoded);
         }
 
         for c in it {
-            out = c.decoder(out);
+            out = c.decode(&out[..]);
         }
 
         out
