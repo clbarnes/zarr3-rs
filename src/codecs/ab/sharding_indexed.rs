@@ -15,7 +15,6 @@ use std::io::{SeekFrom, Write};
 
 use super::{ABCodec, ABCodecType};
 
-
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ShardingIndexedCodec {
     pub chunk_shape: GridCoord,

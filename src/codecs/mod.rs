@@ -24,17 +24,14 @@ use crate::{
 #[derive(Clone, PartialEq, Debug)]
 pub struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,
-    // this is closer to the serialized form.
-    // However, it necessitates extra clones in ab_codec function.
-    // May be better to just reify it early and not round-trip?
-    pub ab_codec: Option<ABCodecType>,
+    pub ab_codec: ABCodecType,
     pub bb_codecs: Vec<BBCodecType>,
 }
 
 impl CodecChain {
     pub fn new(
         aa_codecs: Vec<AACodecType>,
-        ab_codec: Option<ABCodecType>,
+        ab_codec: ABCodecType,
         bb_codecs: Vec<BBCodecType>,
     ) -> Self {
         Self {
@@ -44,10 +41,10 @@ impl CodecChain {
         }
     }
 
-    pub fn ab_codec(&self) -> ABCodecType {
+    pub fn ab_codec(&self) -> &ABCodecType {
         // todo: unnecessary clones?
         // would be nice to return a ref but can't with the default
-        self.ab_codec.clone().unwrap_or_default()
+        &self.ab_codec
     }
 
     pub fn aa_codecs_mut(&mut self) -> &mut Vec<AACodecType> {
@@ -58,11 +55,8 @@ impl CodecChain {
         &mut self.bb_codecs
     }
 
-    pub fn replace_ab_codec<T: Into<ABCodecType>>(
-        &mut self,
-        ab_codec: Option<T>,
-    ) -> Option<ABCodecType> {
-        std::mem::replace(&mut self.ab_codec, ab_codec.map(|c| c.into()))
+    pub fn replace_ab_codec<T: Into<ABCodecType>>(&mut self, ab_codec: T) -> ABCodecType {
+        std::mem::replace(&mut self.ab_codec, ab_codec.into())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -70,12 +64,10 @@ impl CodecChain {
     }
 
     pub fn len(&self) -> usize {
-        let mut out = self.aa_codecs.len() + self.bb_codecs.len();
-        if self.ab_codec.is_some() {
-            out += 1
-        }
-        out
+        self.aa_codecs.len() + self.bb_codecs.len() + 1
     }
+
+    // pub fn validate_index(&self) -> Result<()> {}
 }
 
 impl MaybeNdim for CodecChain {
@@ -85,10 +77,8 @@ impl MaybeNdim for CodecChain {
                 return Some(n);
             }
         }
-        if let Some(c) = self.ab_codec.as_ref() {
-            if let Some(n) = c.maybe_ndim() {
-                return Some(n);
-            }
+        if let Some(n) = self.ab_codec.maybe_ndim() {
+            return Some(n);
         }
         // BB codecs can't have dimensionality
         None
@@ -100,10 +90,8 @@ impl MaybeNdim for CodecChain {
         for ndim in self.aa_codecs.iter().filter_map(|c| c.maybe_ndim()) {
             ndims.insert(ndim);
         }
-        if let Some(c) = self.ab_codec.as_ref() {
-            if let Some(n) = c.maybe_ndim() {
-                ndims.insert(n);
-            }
+        if let Some(n) = self.ab_codec.maybe_ndim() {
+            ndims.insert(n);
         }
         if ndims.len() > 1 {
             Err("Inconsistent codec dimensionalities")
@@ -115,7 +103,7 @@ impl MaybeNdim for CodecChain {
 
 impl Default for CodecChain {
     fn default() -> Self {
-        Self::new(Vec::default(), None, Vec::default())
+        Self::new(Vec::default(), Default::default(), Vec::default())
     }
 }
 
@@ -128,9 +116,7 @@ impl Serialize for CodecChain {
         for aa in self.aa_codecs.iter() {
             seq.serialize_element(aa)?;
         }
-        if let Some(ab) = &self.ab_codec {
-            seq.serialize_element(ab)?;
-        }
+        seq.serialize_element(&self.ab_codec)?;
         for bb in self.bb_codecs.iter() {
             seq.serialize_element(bb)?;
         }
@@ -177,6 +163,8 @@ pub enum CodecChainConstructionError {
     MultipleAB,
     #[error("Illegal codec order: {0} codec found after {1} codec")]
     IllegalOrder(&'static str, &'static str),
+    #[error("No array->bytes codec")]
+    NoAB,
 }
 
 impl FromIterator<CodecType> for Result<CodecChain, CodecChainConstructionError> {
@@ -209,7 +197,11 @@ impl FromIterator<CodecType> for Result<CodecChain, CodecChainConstructionError>
             }
         }
 
-        Ok(CodecChain::new(aa_codecs, ab_codec, bb_codecs))
+        Ok(CodecChain::new(
+            aa_codecs,
+            ab_codec.ok_or(CodecChainConstructionError::NoAB)?,
+            bb_codecs,
+        ))
     }
 }
 
@@ -301,7 +293,7 @@ mod tests {
                 AACodecType::Transpose(TransposeCodec::new_f()),
                 AACodecType::Transpose(TransposeCodec::new_f()),
             ],
-            Some(ABCodecType::Endian(EndianCodec::new_big())),
+            ABCodecType::Endian(EndianCodec::new_big()),
             vec![
                 BBCodecType::Gzip(GzipCodec::default()),
                 BBCodecType::Gzip(GzipCodec::from_level(2).unwrap()),

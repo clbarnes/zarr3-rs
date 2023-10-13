@@ -300,7 +300,7 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
     pub fn ab_codec<C: Into<ABCodecType>>(mut self, codec: C) -> Result<Self, &'static str> {
         let c = codec.into();
         self.union_ndim(&c)?;
-        self.codecs.replace_ab_codec(Some(c));
+        self.codecs.replace_ab_codec(c);
         Ok(self)
     }
 
