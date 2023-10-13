@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 /// Read the entire stream as if it were a payload with a u32le crc32c checksum suffix.
 ///
 /// Return the payload, or an error if the checksum does not match.
-pub fn validate_crc32c<'a, R: Read>(mut r: R) -> io::Result<Vec<u8>> {
+fn validate_crc32c<'a, R: Read>(mut r: R) -> io::Result<Vec<u8>> {
     let mut buf = Vec::default();
     let end = r.read_to_end(&mut buf)?;
     if end < 4 {
@@ -36,7 +36,7 @@ pub fn validate_crc32c<'a, R: Read>(mut r: R) -> io::Result<Vec<u8>> {
     }
 }
 
-pub struct Crc32cReader<R: Read> {
+struct Crc32cReader<R: Read> {
     r: R,
     buf: Option<Cursor<Vec<u8>>>,
 }
@@ -58,7 +58,7 @@ impl<R: Read> Read for Crc32cReader<R> {
     }
 }
 
-pub struct Crc32cWriter<W: Write> {
+struct Crc32cWriter<W: Write> {
     w: W,
     checksum: u32,
 }
@@ -66,10 +66,6 @@ pub struct Crc32cWriter<W: Write> {
 impl<W: Write> Crc32cWriter<W> {
     pub fn new(w: W) -> Self {
         Self { w, checksum: 0 }
-    }
-
-    pub fn into_inner(self) -> (W, u32) {
-        (self.w, self.checksum)
     }
 }
 
@@ -92,6 +88,8 @@ impl<W: Write> FinalWrite for Crc32cWriter<W> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+/// Codec which appends a little-endian CRC32C checksum to an encoded payload,
+/// and allows checking that hash when decoding.
 pub struct Crc32cCodec {}
 
 impl BBCodec for Crc32cCodec {

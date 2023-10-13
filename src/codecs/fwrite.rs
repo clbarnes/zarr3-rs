@@ -12,6 +12,7 @@ pub trait FinalWrite: Write {
     fn finalize(&mut self) -> std::io::Result<usize>;
 }
 
+/// Wrapper around a [Write]r which gives it a no-op `finalize()`
 pub struct FinalWriter<W: Write>(pub W);
 
 impl<W: Write> From<W> for FinalWriter<W> {
