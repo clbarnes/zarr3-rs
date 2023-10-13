@@ -12,23 +12,21 @@ pub trait FinalWrite: Write {
     fn finalize(&mut self) -> std::io::Result<usize>;
 }
 
-pub struct FinalWriter<W: Write> {
-    w: W,
-}
+pub struct FinalWriter<W: Write>(pub W);
 
-impl<W: Write> FinalWriter<W> {
-    pub fn new(w: W) -> Self {
-        Self { w }
+impl<W: Write> From<W> for FinalWriter<W> {
+    fn from(value: W) -> Self {
+        Self(value)
     }
 }
 
 impl<W: Write> Write for FinalWriter<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.w.write(buf)
+        self.0.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.w.flush()
+        self.0.flush()
     }
 }
 

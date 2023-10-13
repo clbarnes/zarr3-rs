@@ -359,7 +359,7 @@ impl<W: Write> Write for BloscWriter<W> {
 
 impl BBCodec for BloscCodec {
     fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn FinalWrite + 'a> {
-        Box::new(FinalWriter::new(BloscWriter::new(self, w)))
+        Box::new(FinalWriter(BloscWriter::new(self, w)))
     }
 
     fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {

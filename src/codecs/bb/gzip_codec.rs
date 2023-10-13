@@ -116,7 +116,7 @@ impl Default for GzipCodec {
 
 impl BBCodec for GzipCodec {
     fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn FinalWrite + 'a> {
-        Box::new(FinalWriter::new(GzEncoder::new(
+        Box::new(FinalWriter(GzEncoder::new(
             w,
             GzCompression::new(self.level as u32),
         )))

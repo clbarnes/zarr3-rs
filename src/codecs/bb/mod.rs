@@ -71,7 +71,7 @@ impl BBCodec for &[BBCodecType] {
         if let Some(c) = it.next() {
             out = c.encoder(w);
         } else {
-            return Box::new(FinalWriter::new(w));
+            return Box::new(FinalWriter(w));
         }
 
         for c in it {
