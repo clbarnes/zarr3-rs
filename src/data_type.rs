@@ -622,10 +622,12 @@ mod tests {
             (r#""r128""#, Raw(128)),
         ];
         for (s, expected) in strs {
-            let dt: DataType = serde_json::from_str(s).unwrap_or_else(|_| panic!("Couldn't parse '{}'", s));
+            let dt: DataType =
+                serde_json::from_str(s).unwrap_or_else(|_| panic!("Couldn't parse '{}'", s));
             assert_eq!(dt, expected, "Got {:?}, expected {:?}", dt, expected);
 
-            let s2 = serde_json::to_string(&dt).unwrap_or_else(|_| panic!("Couldn't serialize {:?}", dt));
+            let s2 = serde_json::to_string(&dt)
+                .unwrap_or_else(|_| panic!("Couldn't serialize {:?}", dt));
             assert_eq!(s, &s2, "Got {:?}, expected {:?}", s2, s);
         }
     }

@@ -82,8 +82,7 @@ impl Default for Order {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TransposeCodec {
     pub order: Order,
 }
@@ -103,8 +102,6 @@ impl TransposeCodec {
         })
     }
 }
-
-
 
 impl AACodec for TransposeCodec {
     fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> ArcArrayD<T> {
@@ -174,7 +171,8 @@ mod test {
     fn roundtrip_order() {
         let to_deser = vec![r#""C""#, r#""F""#, r#"[0,1,2]"#];
         for s in to_deser.into_iter() {
-            let c: Order = serde_json::from_str(s).unwrap_or_else(|_| panic!("Could not deser {s}"));
+            let c: Order =
+                serde_json::from_str(s).unwrap_or_else(|_| panic!("Could not deser {s}"));
             let s2 = serde_json::to_string(&c).unwrap_or_else(|_| panic!("Could not ser {c:?}"));
             assert_eq!(s, &s2); // might depend on spaces
         }

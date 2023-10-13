@@ -161,7 +161,9 @@ impl ArrayMetadata {
 
     /// Ensures that all unknown extensions do not require understanding.
     pub fn try_understand_extensions(&self) -> Result<(), &'static str> {
-        self.extensions.values().try_for_each(|config| config.try_understand())
+        self.extensions
+            .values()
+            .try_for_each(|config| config.try_understand())
     }
 
     /// Ensure that all dimensioned metadata is consistent.
