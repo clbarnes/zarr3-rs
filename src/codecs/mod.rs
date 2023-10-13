@@ -14,6 +14,8 @@ use aa::{AACodec, AACodecType};
 use ab::{ABCodec, ABCodecType};
 use bb::{BBCodec, BBCodecType};
 
+pub(super) mod fwrite;
+
 use crate::{
     data_type::{DataType, ReflectedType},
     ArcArrayD, GridCoord, MaybeNdim,
@@ -152,9 +154,10 @@ impl<'de> Deserialize<'de> for CodecChain {
 
 impl ABCodec for CodecChain {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
-        let bb_w = self.bb_codecs.as_slice().encoder(w);
+        let mut bb_w = self.bb_codecs.as_slice().encoder(w);
         let arr = self.aa_codecs.as_slice().encode(decoded);
-        self.ab_codec().encode::<T, _>(arr, bb_w);
+        self.ab_codec().encode::<T, _>(arr, &mut bb_w);
+        bb_w.finalize().unwrap();
     }
 
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {

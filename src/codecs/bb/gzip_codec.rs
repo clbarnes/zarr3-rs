@@ -8,6 +8,8 @@ use flate2::Compression as GzCompression;
 
 use crate::codecs::bb::BBCodec;
 
+use crate::codecs::fwrite::{FinalWrite, FinalWriter};
+
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Debug, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum GzipLevel {
@@ -113,8 +115,11 @@ impl Default for GzipCodec {
 }
 
 impl BBCodec for GzipCodec {
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
-        Box::new(GzEncoder::new(w, GzCompression::new(self.level as u32)))
+    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn FinalWrite + 'a> {
+        Box::new(FinalWriter::new(GzEncoder::new(
+            w,
+            GzCompression::new(self.level as u32),
+        )))
     }
 
     fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {

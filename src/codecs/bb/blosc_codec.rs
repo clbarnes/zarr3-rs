@@ -6,6 +6,8 @@ use crate::{codecs::bb::BBCodec, data_type::ReflectedType};
 use blosc::{decompress_bytes, Context};
 pub use blosc::{Clevel, Compressor, ShuffleMode};
 
+use crate::codecs::fwrite::{FinalWrite, FinalWriter};
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct BloscCodec {
     #[serde(deserialize_with = "cname_from_str", serialize_with = "cname_to_str")]
@@ -356,8 +358,8 @@ impl<W: Write> Write for BloscWriter<W> {
 }
 
 impl BBCodec for BloscCodec {
-    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn Write + 'a> {
-        Box::new(BloscWriter::new(self, w))
+    fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn FinalWrite + 'a> {
+        Box::new(FinalWriter::new(BloscWriter::new(self, w)))
     }
 
     fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
