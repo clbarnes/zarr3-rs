@@ -24,6 +24,7 @@ fn validate_crc32c<'a, R: Read>(mut r: R) -> io::Result<Vec<u8>> {
         buf.pop().unwrap(),
         buf.pop().unwrap(),
     ];
+    // big-endian because the pops above guarantee reverse order
     let expected = u32::from_be_bytes(suff_be);
     let actual = crc32c(&buf);
     if expected == actual {
@@ -36,25 +37,31 @@ fn validate_crc32c<'a, R: Read>(mut r: R) -> io::Result<Vec<u8>> {
     }
 }
 
+/// [Read]er wrapper which, on first call to `.read()`, reads the entire wrapped [Read]er,
+/// interprets the last 4 bytes as a u32le CRC32C checksum, and checks that it matches the rest of the content.
+///
+/// The payload is cached so that subsequent calls to `.read()` seem to progress through the wrapped reader normally.
+/// In practice, these subsequent reads are infallible.
 struct Crc32cReader<R: Read> {
     r: R,
-    buf: Option<Cursor<Vec<u8>>>,
+    content: Option<Cursor<Vec<u8>>>,
 }
 
 impl<R: Read> Crc32cReader<R> {
     pub fn new(r: R) -> Self {
-        Self { r, buf: None }
+        Self { r, content: None }
     }
 }
 
 impl<R: Read> Read for Crc32cReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.buf.is_none() {
-            let buf = validate_crc32c(&mut self.r)?;
-            self.buf = Some(Cursor::new(buf));
+        if self.content.is_none() {
+            // no reads have happened yet
+            let content = validate_crc32c(&mut self.r)?;
+            self.content = Some(Cursor::new(content));
         }
 
-        self.buf.as_mut().unwrap().read(buf)
+        self.content.as_mut().unwrap().read(buf)
     }
 }
 
@@ -83,7 +90,9 @@ impl<W: Write> Write for Crc32cWriter<W> {
 
 impl<W: Write> FinalWrite for Crc32cWriter<W> {
     fn finalize(&mut self) -> io::Result<usize> {
-        self.w.write_u32::<LittleEndian>(self.checksum).map(|_| 4)
+        self.w
+            .write_u32::<LittleEndian>(self.checksum)
+            .map(|_| std::mem::size_of::<u32>())
     }
 }
 
@@ -122,9 +131,37 @@ mod tests {
 
         assert_eq!(out, TEST_STRING);
 
+        // change the checksum value
         let last = buf.pop().unwrap();
         buf.push(last.wrapping_add(1));
         assert!(validate_crc32c(buf.as_slice()).is_err())
+    }
+
+    #[test]
+    fn can_read() {
+        let mut buf = Vec::default();
+        buf.extend_from_slice(TEST_STRING);
+        buf.extend_from_slice(&CHECKSUM);
+
+        let mut r = Crc32cReader::new(&buf[..]);
+        let mut out = Vec::default();
+        r.read_to_end(&mut out).unwrap();
+        assert_eq!(out, TEST_STRING);
+    }
+
+    #[test]
+    fn can_fail_read() {
+        let mut buf = Vec::default();
+        buf.extend_from_slice(TEST_STRING);
+        buf.extend_from_slice(&CHECKSUM);
+        // change the checksum value
+        let last = buf.pop().unwrap();
+        buf.push(last.wrapping_add(1));
+
+        let mut r = Crc32cReader::new(&buf[..]);
+        let mut out = Vec::default();
+        let res = r.read_to_end(&mut out);
+        assert!(res.is_err())
     }
 
     #[test]
