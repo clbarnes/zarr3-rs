@@ -69,3 +69,14 @@ impl ABCodec for EndianCodec {
         T::read_array_from(r, self.endian, shape.as_slice())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deser_endian() {
+        let s = r#"{"endian": "little"}"#;
+        let _codec: EndianCodec = serde_json::from_str(s).unwrap();
+    }
+}

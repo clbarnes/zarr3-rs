@@ -7,7 +7,7 @@ pub use transpose::TransposeCodec;
 use super::ArrayRepr;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "lowercase", tag = "codec", content = "configuration")]
+#[serde(rename_all = "lowercase", tag = "name", content = "configuration")]
 #[enum_delegate::implement(AACodec)]
 pub enum AACodecType {
     Transpose(TransposeCodec),
@@ -71,15 +71,17 @@ mod test {
 
     #[test]
     fn roundtrip_aacodec_transpose() {
-        let s = r#"{"codec": "transpose", "configuration": {"order": [1, 2, 0]}}"#;
-        let aa: AACodecType = serde_json::from_str(s).expect("Could not deser AACodec::Transpose");
+        let s = r#"{"name": "transpose", "configuration": {"order": [1, 2, 0]}}"#;
+        let aa: AACodecType =
+            serde_json::from_str(s).expect("Could not deser AACodecType::Transpose");
         assert_eq!(
             aa,
             AACodecType::Transpose(TransposeCodec::new_permutation(smallvec![1, 2, 0]).unwrap())
         );
 
-        let s = r#"{"codec": "transpose", "configuration": {"order": "C"}}"#;
-        let aa: AACodecType = serde_json::from_str(s).expect("Could not deser AACodec::Transpose");
+        let s = r#"{"name": "transpose", "configuration": {"order": "C"}}"#;
+        let aa: AACodecType =
+            serde_json::from_str(s).expect("Could not deser AACodecType::Transpose");
         assert_eq!(
             aa,
             AACodecType::Transpose(TransposeCodec { order: Order::C })

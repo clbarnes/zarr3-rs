@@ -138,12 +138,16 @@ mod tests {
                     "separator": "/"
                 }
             },
-            "codecs": [{
-                "name": "gzip",
-                "configuration": {
-                    "level": 1
+            "codecs": [
+                {
+                    "name": "endian",
+                    "configuration": {"endian": "little"}
+                },
+                {
+                    "name": "gzip",
+                    "configuration": {"level": 1}
                 }
-            }],
+            ],
             "fill_value": "NaN",
             "attributes": {
                 "foo": 42,

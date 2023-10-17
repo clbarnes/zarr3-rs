@@ -32,7 +32,7 @@ impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "snake_case", tag = "codec", content = "configuration")]
+#[serde(rename_all = "snake_case", tag = "name", content = "configuration")]
 // #[enum_delegate::implement(ABCodec)]
 pub enum ABCodecType {
     Endian(EndianCodec),
