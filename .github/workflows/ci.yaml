@@ -39,6 +39,7 @@ jobs:
       - run: sudo apt-get install -y libblosc-dev
         if: startsWith(matrix.os, 'ubuntu')
       - run: cargo test --all-features
+      - run: cargo run --example roundtrip
 
   deploy:
     runs-on: ubuntu-latest
