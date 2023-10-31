@@ -9,7 +9,7 @@ use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
 
-use crate::{codecs::ab::endian::Endian, ArcArrayD};
+use crate::{codecs::ab::bytes_codec::Endian, ArcArrayD};
 
 pub trait NBytes {
     fn nbytes(&self) -> usize;

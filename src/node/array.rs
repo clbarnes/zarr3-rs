@@ -654,7 +654,7 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
 mod tests {
     use crate::{
         chunk_key_encoding::V2ChunkKeyEncoding,
-        codecs::{aa::TransposeCodec, ab::endian::EndianCodec, bb::gzip_codec::GzipCodec},
+        codecs::{aa::TransposeCodec, ab::bytes_codec::BytesCodec, bb::gzip_codec::GzipCodec},
     };
 
     use super::ArrayMetadataBuilder;
@@ -669,7 +669,7 @@ mod tests {
             .fill_value(1.0)
             .push_aa_codec(TransposeCodec::new_f())
             .unwrap()
-            .ab_codec(EndianCodec::new_little())
+            .ab_codec(BytesCodec::new_little())
             .unwrap()
             .push_bb_codec(GzipCodec::default())
             .dimension_names(smallvec![

@@ -250,7 +250,7 @@ impl<T: ReflectedType> From<GridCoord> for ArrayRepr<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::codecs::ab::endian::EndianCodec;
+    use crate::codecs::ab::bytes_codec::BytesCodec;
     use crate::codecs::bb::gzip_codec::GzipCodec;
     use crate::ArcArrayD;
 
@@ -293,7 +293,7 @@ mod tests {
                 AACodecType::Transpose(TransposeCodec::new_f()),
                 AACodecType::Transpose(TransposeCodec::new_f()),
             ],
-            ABCodecType::Endian(EndianCodec::new_big()),
+            ABCodecType::Endian(BytesCodec::new_big()),
             vec![
                 BBCodecType::Gzip(GzipCodec::default()),
                 BBCodecType::Gzip(GzipCodec::from_level(2).unwrap()),

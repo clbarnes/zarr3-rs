@@ -4,8 +4,8 @@ use crate::{data_type::ReflectedType, variant_from_data, ArcArrayD, MaybeNdim};
 
 use serde::{Deserialize, Serialize};
 
-pub mod endian;
-use endian::EndianCodec;
+pub mod bytes_codec;
+use bytes_codec::BytesCodec;
 // pub mod sharding_indexed;
 // use sharding_indexed::ShardingIndexedCodec;
 
@@ -35,7 +35,7 @@ impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
 #[serde(rename_all = "snake_case", tag = "name", content = "configuration")]
 // #[enum_delegate::implement(ABCodec)]
 pub enum ABCodecType {
-    Endian(EndianCodec),
+    Endian(BytesCodec),
     // box is necessary as sharding codec contains codecs,
     // so it's a recursive enum of potentially infinite size
     // ShardingIndexed(Box<ShardingIndexedCodec>),
@@ -68,11 +68,11 @@ impl MaybeNdim for ABCodecType {
 
 impl Default for ABCodecType {
     fn default() -> Self {
-        Self::Endian(EndianCodec::default())
+        Self::Endian(BytesCodec::default())
     }
 }
 
-variant_from_data!(ABCodecType, Endian, EndianCodec);
+variant_from_data!(ABCodecType, Endian, BytesCodec);
 
 // impl From<ShardingIndexedCodec> for ABCodecType {
 //     fn from(c: ShardingIndexedCodec) -> Self {
