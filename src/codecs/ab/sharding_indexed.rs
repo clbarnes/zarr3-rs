@@ -1,7 +1,8 @@
 use crc32c::crc32c;
+use ndarray::{ArrayD, IxDyn, SliceInfo, SliceInfoElem};
 use serde::{Deserialize, Serialize};
 
-use std::io::{BufWriter, Cursor, Read, Seek};
+use std::io::{self, BufWriter, Cursor, Read, Seek};
 use thiserror::Error;
 
 use crate::chunk_arr::{offset_shape_to_slice_info, ChunkIter};
@@ -9,7 +10,8 @@ use crate::codecs::aa::AACodecType;
 use crate::codecs::bb::BBCodecType;
 use crate::codecs::{ArrayRepr, CodecChain};
 use crate::data_type::ReflectedType;
-use crate::{ArcArrayD, GridCoord, MaybeNdim, Ndim};
+use crate::util::DimensionMismatch;
+use crate::{ArcArrayD, CoordVec, GridCoord, MaybeNdim, Ndim};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{SeekFrom, Write};
 
@@ -19,6 +21,80 @@ use super::{ABCodec, ABCodecType};
 pub struct ShardingIndexedCodec {
     pub chunk_shape: GridCoord,
     pub codecs: CodecChain,
+    pub index_codecs: CodecChain,
+}
+
+pub struct ShardingIndex {
+    /// ND array of shape [...chunk_shape, 2], where the last dimension is the offset and nbytes of the chunk
+    idx_array: ArcArrayD<u64>,
+}
+
+pub enum ChunkAddr {
+    Empty,
+    OutOfBounds,
+    IncorrectDims,
+    Addr { offset: u64, nbytes: u64 },
+}
+
+impl Default for ChunkAddr {
+    fn default() -> Self {
+        Self::Empty
+    }
+}
+
+impl ShardingIndex {
+    fn new_unchecked(idx_array: ArcArrayD<u64>) -> Self {
+        Self { idx_array }
+    }
+
+    fn new_empty(chunk_shape: GridCoord) -> Self {
+        let mut cs: Vec<usize> = chunk_shape.iter().map(|v| *v as usize).collect();
+        cs.push(2);
+        let idx_array = ArcArrayD::from_shape_simple_fn(cs, || u64::MAX);
+        Self::new_unchecked(idx_array)
+    }
+
+    fn get_address(&self, chunk_idx: GridCoord) -> ChunkAddr {
+        if chunk_idx.len() != self.idx_array.ndim() - 1 {
+            return ChunkAddr::IncorrectDims;
+        }
+        let mut elems = CoordVec::default();
+        for (idx, sh) in chunk_idx.iter().zip(self.idx_array.shape().iter()) {
+            if *idx as usize >= *sh {
+                return ChunkAddr::OutOfBounds;
+            }
+            elems.push(SliceInfoElem::Index(*idx as isize))
+        }
+        elems.push(SliceInfoElem::Slice {
+            start: 0,
+            end: Some(2),
+            step: 1,
+        });
+        let slice: SliceInfo<_, IxDyn, IxDyn> = SliceInfo::try_from(elems.as_slice()).unwrap();
+
+        let sliced = self.idx_array.slice(slice);
+        let mut it = sliced.iter();
+        ChunkAddr::Addr {
+            offset: *it.next().unwrap(),
+            nbytes: *it.next().unwrap(),
+        }
+    }
+
+    pub fn write<W: Write>(&self, writer: W, codecs: CodecChain) -> io::Result<()> {
+        // todo: check whether this is a cheap clone
+        let res = codecs.encode(self.idx_array.clone(), writer);
+        Ok(res)
+    }
+}
+
+fn validate_index_codecs(chain: &CodecChain) -> bool {
+    for bb in chain.bb_codecs.iter() {
+        match bb {
+            BBCodecType::Crc32c(_) => (),
+            _ => return false,
+        }
+    }
+    true
 }
 
 impl Ndim for ShardingIndexedCodec {
@@ -32,10 +108,11 @@ impl ShardingIndexedCodec {
         Self {
             chunk_shape: chunk_shape.into(),
             codecs: CodecChain::default(),
+            index_codecs: CodecChain::default(),
         }
     }
 
-    pub fn n_chunks(&self, shard_shape: &[u64]) -> Result<Vec<u64>, &'static str> {
+    pub fn n_chunks(&self, shard_shape: &[u64]) -> Result<GridCoord, &'static str> {
         self.chunk_shape
             .iter()
             .zip(shard_shape.iter())
@@ -48,40 +125,59 @@ impl ShardingIndexedCodec {
             .collect()
     }
 
-    /// Set the array->bytes codec.
-    ///
-    /// By default, uses a little-[crate::codecs::ab::endian::EndianCodec].
-    ///
-    /// Replaces an existing AB codec.
-    /// Fails if the dimensions are not compatible with the array's shape.
-    pub fn ab_codec<T: Into<ABCodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
-        let c = codec.into();
-        self.union_ndim(&c)?;
-        self.codecs.replace_ab_codec(Some(c));
-        Ok(self)
+    pub fn read_index<R: Read>(
+        &self,
+        reader: R,
+        shard_shape: &[u64],
+    ) -> Result<ShardingIndex, &'static str> {
+        let arr = self.index_codecs.decode(
+            reader,
+            ArrayRepr {
+                shape: self.n_chunks(shard_shape)?,
+                fill_value: u64::MAX,
+            },
+        );
+        Ok(ShardingIndex::new_unchecked(arr))
     }
 
-    /// Append an array->array codec.
-    ///
-    /// This will be the last AA encoder, or first AA decoder.
-    ///
-    /// Fails if the dimensions are not compatible with the array's shape.
-    pub fn push_aa_codec<T: Into<AACodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
-        let c = codec.into();
-        self.union_ndim(&c)?;
-        self.codecs.aa_codecs_mut().push(c);
-        Ok(self)
-    }
+    // /// Set the array->bytes codec.
+    // ///
+    // /// By default, uses a little-[crate::codecs::ab::endian::EndianCodec].
+    // ///
+    // /// Replaces an existing AB codec.
+    // /// Fails if the dimensions are not compatible with the array's shape.
+    // pub fn ab_codec<T: Into<ABCodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+    //     let c = codec.into();
+    //     self.union_ndim(&c)?;
+    //     self.codecs.replace_ab_codec(c);
+    //     Ok(self)
+    // }
 
-    /// Append a bytes->bytes codec.
-    ///
-    /// This will be the last BB encoder, or first BB decoder.
-    pub fn push_bb_codec<T: Into<BBCodecType>>(mut self, codec: T) -> Self {
-        let c = codec.into();
-        // todo: check blosc type size
-        self.codecs.bb_codecs_mut().push(c);
-        self
-    }
+    // /// Append an array->array codec.
+    // ///
+    // /// This will be the last AA encoder, or first AA decoder.
+    // ///
+    // /// Fails if the dimensions are not compatible with the array's shape.
+    // pub fn push_aa_codec<T: Into<AACodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+    //     let c = codec.into();
+    //     self.union_ndim(&c)?;
+    //     self.codecs.aa_codecs_mut().push(c);
+    //     Ok(self)
+    // }
+
+    // /// Append a bytes->bytes codec.
+    // ///
+    // /// This will be the last BB encoder, or first BB decoder.
+    // pub fn push_bb_codec<T: Into<BBCodecType>>(mut self, codec: T) -> Result<Self, &'static str> {
+    //     let c = codec.into();
+    //     match c {
+    //         BBCodecType::Crc32c(_) => (),
+    //         _ => return Err("Invalid codec given"),
+    //     }
+    //     // todo: check blosc type size
+    //     self.codecs.bb_codecs_mut().push(c);
+    //     Ok(self)
+    // }
 }
 
 #[derive(Error, Debug)]
@@ -496,12 +592,16 @@ mod tests {
     fn roundtrip_shard_complex() {
         use crate::codecs::bb::gzip_codec::GzipCodec;
 
-        let codec = ShardingIndexedCodec::new(smallvec![10, 20])
-            .push_aa_codec(TransposeCodec::new_f())
-            .unwrap()
-            .ab_codec(EndianCodec::new_big())
-            .unwrap()
-            .push_bb_codec(GzipCodec::default());
+        let mut codec = ShardingIndexedCodec::new(smallvec![10, 20]);
+        codec
+            .codecs
+            .aa_codecs_mut()
+            .push(TransposeCodec::new_f().into());
+        codec.codecs.replace_ab_codec(EndianCodec::new_big());
+        codec
+            .codecs
+            .bb_codecs_mut()
+            .push(GzipCodec::default().into());
 
         let arr = make_arr();
         let arr1 = arr.clone();
