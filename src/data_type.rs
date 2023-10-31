@@ -403,7 +403,7 @@ pub trait ReflectedType:
 
         for val in array.into_iter() {
             encoder(val, buf.as_mut());
-            bw.write(buf.as_mut()).unwrap();
+            bw.write_all(buf.as_mut()).unwrap();
         }
         bw.flush()
     }

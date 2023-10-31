@@ -73,8 +73,8 @@ impl ABCodec for BytesCodec {
         let endian = match self.endian {
             Some(e) => e,
             None => {
-                if T::ZARR_TYPE.nbytes() != 1 {
-                    panic!("Undefined endianness is only valid with single-byte dtypes");
+                if T::ZARR_TYPE.has_endianness() {
+                    panic!("Endianness undefined for dtype which requires it");
                 }
                 Default::default()
             }
@@ -89,8 +89,8 @@ impl ABCodec for BytesCodec {
         let endian = match self.endian {
             Some(e) => e,
             None => {
-                if T::ZARR_TYPE.nbytes() != 1 {
-                    panic!("Undefined endianness is only valid with single-byte dtypes");
+                if T::ZARR_TYPE.has_endianness() {
+                    panic!("Endianness undefined for dtype which requires it");
                 }
                 Default::default()
             }
