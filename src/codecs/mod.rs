@@ -293,9 +293,9 @@ mod tests {
         let arr = make_arr();
         let chain = CodecChain::new(
             vec![
-                AACodecType::Transpose(TransposeCodec::new_f()),
-                AACodecType::Transpose(TransposeCodec::new_f()),
-                AACodecType::Transpose(TransposeCodec::new_f()),
+                AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
+                AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
+                AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
             ],
             ABCodecType::Endian(BytesCodec::new_big()),
             vec![

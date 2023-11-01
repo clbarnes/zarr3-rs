@@ -2,133 +2,65 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{codecs::ArrayRepr, data_type::ReflectedType, ArcArrayD, CoordVec, MaybeNdim};
+use crate::{codecs::ArrayRepr, data_type::ReflectedType, ArcArrayD, CoordVec, Ndim};
 
 use super::AACodec;
 
-mod strings {
-    use crate::named_unit_variant;
-    named_unit_variant!(C);
-    named_unit_variant!(F);
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(untagged)]
-pub enum Order {
-    #[serde(with = "strings::C")]
-    C,
-    #[serde(with = "strings::F")]
-    F,
-    Permutation(CoordVec<usize>),
-}
-
-impl Order {
-    /// Checks that order is a valid permutation,
-    /// and simplifies to C or F if possible.
-    pub fn validate(self) -> Result<Self, &'static str> {
-        let permutation = match self {
-            Order::C => return Ok(self),
-            Order::F => return Ok(self),
-            Order::Permutation(p) => p,
-        };
-
-        let mut it = permutation.iter();
-        let mut last = *it.next().ok_or("Empty permutations")?;
-
-        let mut visited = HashSet::with_capacity(permutation.len());
-        visited.insert(last);
-
-        let mut is_increasing = true;
-        let mut is_decreasing = true;
-
-        for p in it {
-            if is_decreasing && p > &last {
-                is_decreasing = false;
-            }
-            if is_increasing && p < &last {
-                is_increasing = false;
-            }
-            if !visited.insert(*p) {
-                return Err("Repeated dimension index");
-            }
-            last = *p;
-        }
-
-        if visited.into_iter().max().unwrap() != permutation.len() - 1 {
-            return Err("Skipped dimension index");
-        }
-
-        if is_increasing {
-            Ok(Self::C)
-        } else if is_decreasing {
-            Ok(Self::F)
-        } else {
-            Ok(Self::Permutation(permutation))
-        }
-    }
-
-    pub fn new_permutation(permutation: CoordVec<usize>) -> Result<Self, &'static str> {
-        Self::Permutation(permutation).validate()
-    }
-}
-
-// impl From<NDAOrder> for Order {}
-
-// impl TryInto<NDAOrder> for Order {}
-
-impl Default for Order {
-    fn default() -> Self {
-        Self::C
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TransposeCodec {
-    pub order: Order,
+    pub order: CoordVec<usize>,
+}
+
+fn validate_permutation(perm: &[usize]) -> Result<(), &'static str> {
+    let max = perm.len();
+    let mut elems = HashSet::with_capacity(max);
+    for item in perm.iter() {
+        if item >= &max {
+            return Err("Permutation skips some elements");
+        }
+        if !elems.insert(item) {
+            return Err("Permutation contains repeated elements");
+        }
+    }
+
+    Ok(())
 }
 
 impl TransposeCodec {
-    pub fn new_c() -> Self {
-        Self { order: Order::C }
+    pub fn new_transpose(ndim: usize) -> Self {
+        let order = (0..ndim).rev().collect();
+        Self { order }
     }
 
-    pub fn new_f() -> Self {
-        Self { order: Order::F }
+    pub fn new(perm: CoordVec<usize>) -> Result<Self, &'static str> {
+        let s = Self { order: perm };
+        s.validate()?;
+        Ok(s)
     }
 
-    pub fn new_permutation(perm: CoordVec<usize>) -> Result<Self, &'static str> {
-        Ok(Self {
-            order: Order::new_permutation(perm)?,
-        })
+    pub fn validate(&self) -> Result<(), &'static str> {
+        validate_permutation(&self.order)
     }
 }
 
 impl AACodec for TransposeCodec {
     fn encode<T: ReflectedType>(&self, decoded: ArcArrayD<T>) -> ArcArrayD<T> {
-        match &self.order {
-            Order::C => decoded,
-            Order::F => decoded.reversed_axes(),
-            Order::Permutation(p) => decoded.permuted_axes(p.as_slice()),
-        }
+        decoded.permuted_axes(self.order.as_slice())
     }
 
     fn decode<T: ReflectedType>(&self, encoded: ArcArrayD<T>) -> ArcArrayD<T> {
-        match &self.order {
-            Order::C => encoded,
-            Order::F => encoded.reversed_axes(),
-            Order::Permutation(p) => encoded.permuted_axes(reverse_permutation(p).as_slice()),
-        }
+        encoded.permuted_axes(reverse_permutation(self.order.as_slice()).as_slice())
     }
 
     fn compute_encoded_representation<T: ReflectedType>(
         &self,
         decoded_repr: ArrayRepr<T>,
     ) -> ArrayRepr<T> {
-        let shape = match &self.order {
-            Order::C => decoded_repr.shape,
-            Order::F => decoded_repr.shape.iter().rev().cloned().collect(),
-            Order::Permutation(p) => p.iter().map(|idx| decoded_repr.shape[*idx]).collect(),
-        };
+        let shape = self
+            .order
+            .iter()
+            .map(|idx| decoded_repr.shape[*idx])
+            .collect();
         ArrayRepr {
             shape,
             fill_value: decoded_repr.fill_value,
@@ -143,18 +75,9 @@ fn reverse_permutation(p: &[usize]) -> CoordVec<usize> {
         .collect()
 }
 
-impl MaybeNdim for Order {
-    fn maybe_ndim(&self) -> Option<usize> {
-        match self {
-            Self::Permutation(p) => Some(p.len()),
-            _ => None,
-        }
-    }
-}
-
-impl MaybeNdim for TransposeCodec {
-    fn maybe_ndim(&self) -> Option<usize> {
-        self.order.maybe_ndim()
+impl Ndim for TransposeCodec {
+    fn ndim(&self) -> usize {
+        self.order.len()
     }
 }
 
@@ -169,9 +92,9 @@ mod test {
 
     #[test]
     fn roundtrip_order() {
-        let to_deser = vec![r#""C""#, r#""F""#, r#"[0,1,2]"#];
+        let to_deser = vec![r#"[0,1,2]"#];
         for s in to_deser.into_iter() {
-            let c: Order =
+            let c: Vec<usize> =
                 serde_json::from_str(s).unwrap_or_else(|_| panic!("Could not deser {s}"));
             let s2 = serde_json::to_string(&c).unwrap_or_else(|_| panic!("Could not ser {c:?}"));
             assert_eq!(s, &s2); // might depend on spaces
@@ -183,34 +106,10 @@ mod test {
     }
 
     #[test]
-    fn transpose_c_is_noop() {
-        let orig = make_arr();
-        let t = TransposeCodec::new_c();
-        let encoded = t.encode(orig.clone());
-        assert_eq!(encoded.shape(), orig.shape());
-        let decoded = t.decode(encoded.clone());
-        assert_eq!(decoded.shape(), orig.shape());
-    }
-
-    #[test]
-    fn transpose_f() {
-        let orig = make_arr();
-        let t = TransposeCodec::new_f();
-        let encoded = t.encode(orig.clone());
-
-        let mut rev_shape = orig.shape().to_vec();
-        rev_shape.reverse();
-        assert_eq!(encoded.shape(), rev_shape.as_slice());
-
-        let decoded = t.decode(encoded.clone());
-        assert_eq!(decoded.shape(), orig.shape());
-    }
-
-    #[test]
     fn transpose_permutation() {
         let orig = make_arr();
         let perm = smallvec![2, 0, 1];
-        let t = TransposeCodec::new_permutation(perm.clone()).unwrap();
+        let t = TransposeCodec::new(perm.clone()).unwrap();
 
         let encoded = t.encode(orig.clone());
         let expected_shape: Vec<_> = perm.iter().map(|idx| SHAPE[*idx]).collect();
@@ -218,5 +117,11 @@ mod test {
 
         let decoded = t.decode(encoded.clone());
         assert_eq!(decoded.shape(), orig.shape());
+    }
+
+    #[test]
+    fn transpose() {
+        let t = TransposeCodec::new_transpose(3);
+        assert_eq!(t.order.as_slice(), &[2, 1, 0])
     }
 }

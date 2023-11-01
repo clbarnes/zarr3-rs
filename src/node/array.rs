@@ -677,7 +677,7 @@ mod tests {
             .unwrap()
             .chunk_key_encoding(V2ChunkKeyEncoding::default())
             .fill_value(1.0)
-            .push_aa_codec(TransposeCodec::new_f())
+            .push_aa_codec(TransposeCodec::new_transpose(3))
             .unwrap()
             .ab_codec(BytesCodec::new_little())
             .unwrap()
