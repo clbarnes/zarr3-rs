@@ -108,4 +108,20 @@ mod tests {
         let s = r#"{}"#;
         let _codec: BytesCodec = serde_json::from_str(s).unwrap();
     }
+
+    #[test]
+    fn can_validate_endian() {
+        let ab = BytesCodec::new_big();
+
+        ab.valid_endian::<f32>().unwrap();
+        ab.valid_endian::<u8>().unwrap();
+    }
+
+    #[test]
+    fn can_invalidate_endian() {
+        let ab = BytesCodec::new(None);
+        ab.valid_endian::<u8>().unwrap();
+        ab.valid_endian::<[u8; 4]>().unwrap();
+        assert!(ab.valid_endian::<f32>().is_err());
+    }
 }

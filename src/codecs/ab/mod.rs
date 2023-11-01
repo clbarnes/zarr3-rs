@@ -107,3 +107,16 @@ variant_from_data!(ABCodecType, Endian, BytesCodec);
 //         Self::ShardingIndexed(Box::new(c))
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_validate_endian() {
+        let ab = ABCodecType::default();
+
+        ab.valid_endian::<f32>().unwrap();
+        ab.valid_endian::<u8>().unwrap();
+    }
+}

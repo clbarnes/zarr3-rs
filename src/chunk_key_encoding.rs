@@ -8,8 +8,15 @@ use crate::{store::NodeKey, CoordVec};
 
 #[enum_delegate::register]
 pub trait ChunkKeyEncoder {
+    /// For a given coordinate slice, return the node name.
+    ///
+    /// If the encoder would insert path separators (e.g. `/`),
+    /// the output will have multiple items in it.
+    /// If the encoder would not (e.g. joining the coordinates with `.`),
+    /// the output will have a single item.
     fn components(&self, coord: &[u64]) -> CoordVec<NodeName>;
 
+    /// Get the key for a chunk below the given (array) node with the given coordinates.
     fn chunk_key(&self, node: &NodeKey, coord: &[u64]) -> NodeKey {
         let mut n = node.clone();
         for c in self.components(coord) {

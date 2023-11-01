@@ -751,4 +751,33 @@ mod tests {
             serde_json::from_value::<[u8; 16]>(DataType::Raw(128).default_fill_value()).unwrap()
         );
     }
+
+    #[test]
+    fn can_validate_endian() {
+        for dt in vec![
+            DataType::Bool,
+            DataType::UInt(IntSize::b8),
+            DataType::Int(IntSize::b8),
+            DataType::Raw(1),
+            DataType::Raw(2),
+            DataType::Raw(4),
+        ] {
+            for e in vec![Endian::Little, Endian::Big] {
+                dt.valid_endian(Some(e)).unwrap();
+            }
+            dt.valid_endian(None).unwrap();
+        }
+
+        for dt in vec![
+            DataType::UInt(IntSize::b16),
+            DataType::Int(IntSize::b32),
+            DataType::Float(FloatSize::b32),
+            DataType::Complex(ComplexSize::b64),
+        ] {
+            for e in vec![Endian::Little, Endian::Big] {
+                dt.valid_endian(Some(e)).unwrap();
+            }
+            assert!(dt.valid_endian(None).is_err());
+        }
+    }
 }
