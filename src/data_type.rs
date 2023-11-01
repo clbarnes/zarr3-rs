@@ -12,14 +12,34 @@ use serde_with::serde_as;
 use crate::{codecs::ab::bytes_codec::Endian, ArcArrayD};
 
 pub trait NBytes {
+    // todo - might need variable at some point
+    /// Number of bytes in the data type
     fn nbytes(&self) -> usize;
 
+    /// Number of bits in the data type
     fn nbits(&self) -> usize {
         self.nbytes() * 8
     }
 
+    /// Whether the data type should have an endianness.
     fn has_endianness(&self) -> bool {
         self.nbytes() > 1
+    }
+
+    /// A valid endianness for this data type.
+    ///
+    /// Uses the given endianness if [Some], or a meaningless default if the data type does not require one (e.g. single-byte) and [None] is given, or an error if an endianness is needed but not given.
+    fn valid_endian(&self, endian: Option<Endian>) -> Result<Endian, &'static str> {
+        match endian {
+            Some(e) => Ok(e),
+            None => {
+                if self.has_endianness() {
+                    Err("Endianness undefined for dtype which requires it (multi-byte, not raw)")
+                } else {
+                    Ok(Default::default())
+                }
+            }
+        }
     }
 }
 
@@ -363,6 +383,9 @@ pub type c64 = num_complex::Complex32;
 #[allow(non_camel_case_types)]
 pub type c128 = num_complex::Complex64;
 
+type PrimitiveEncoder<T> = Box<dyn Fn(T, &mut [u8])>;
+type PrimitiveDecoder<T> = Box<dyn Fn(&mut [u8]) -> T>;
+
 /// Trait implemented by primitive types that are reflected in Zarr.
 ///
 /// The supertraits are not necessary for this trait, but are used to
@@ -388,11 +411,11 @@ pub trait ReflectedType:
     // this is to avoid a match in a hot loop but the Box deref might be slower anyway?
     /// Produce a routine which writes the bytes of a self-typed value
     /// into the given buffer.
-    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])>;
+    fn encoder(endian: Endian) -> PrimitiveEncoder<Self>;
 
     /// Produce a routine which reads a self-typed value from
     /// the given byte buffer.
-    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self>;
+    fn decoder(endian: Endian) -> PrimitiveDecoder<Self>;
 
     // todo: replace array reading/writing with these
     // use bufreader & bufwriter, read however many bytes we need for a single item, use std (to|from)_[lb]e_bytes

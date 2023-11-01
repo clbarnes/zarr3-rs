@@ -1,6 +1,9 @@
 use std::io::{Read, Write};
 
-use crate::{data_type::ReflectedType, variant_from_data, ArcArrayD, MaybeNdim};
+use crate::{
+    data_type::{NBytes, ReflectedType},
+    variant_from_data, ArcArrayD, MaybeNdim,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,14 +12,28 @@ use bytes_codec::BytesCodec;
 // pub mod sharding_indexed;
 // use sharding_indexed::ShardingIndexedCodec;
 
+use self::bytes_codec::Endian;
+
 use super::ArrayRepr;
 
 // enum_delegate doesn't work here because of type annotations?
 // #[enum_delegate::register]
 pub trait ABCodec {
+    /// Write the given array to the given [Write]r, via the configured codecs.
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W);
 
+    /// Read an array from the given [Read]er, via the configured codecs.
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T>;
+
+    /// The configured byte endianness for this codec.
+    fn endian(&self) -> Option<Endian>;
+
+    /// A valid endianness for this data type.
+    ///
+    /// Uses the given endianness if the codec's endianness is [Some], or a meaningless default if the data type does not require one (e.g. single-byte) and [None] is given, or an error if an endianness is needed but not given.
+    fn valid_endian<T: ReflectedType>(&self) -> Result<Endian, &'static str> {
+        T::ZARR_TYPE.valid_endian(self.endian())
+    }
 }
 
 impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
@@ -28,6 +45,10 @@ impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         (**self).decode(r, decoded_repr)
         // ABCodec::decode::<T, R>(self, r, decoded_repr)
+    }
+
+    fn endian(&self) -> Option<Endian> {
+        (**self).endian()
     }
 }
 
@@ -53,6 +74,13 @@ impl ABCodec for ABCodecType {
         match self {
             Self::Endian(c) => c.decode(r, decoded_repr),
             // Self::ShardingIndexed(c) => c.decode(r, decoded_repr),
+        }
+    }
+
+    fn endian(&self) -> Option<Endian> {
+        match self {
+            Self::Endian(c) => c.endian(),
+            // Self::ShardingIndexed(c) => c.endian(),
         }
     }
 }

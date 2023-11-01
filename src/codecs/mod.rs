@@ -155,6 +155,10 @@ impl ABCodec for CodecChain {
         let arr = self.ab_codec().decode::<T, _>(bb_r, ab_repr);
         self.aa_codecs.as_slice().decode(arr)
     }
+
+    fn endian(&self) -> Option<ab::bytes_codec::Endian> {
+        self.ab_codec.endian()
+    }
 }
 
 #[derive(Error, Debug)]
