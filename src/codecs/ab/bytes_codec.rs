@@ -70,15 +70,12 @@ impl BytesCodec {
 
 impl ABCodec for BytesCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
-        let endian = match self.endian {
-            Some(e) => e,
-            None => {
-                if T::ZARR_TYPE.has_endianness() {
-                    panic!("Endianness undefined for dtype which requires it");
-                }
-                Default::default()
+        let endian = self.endian.unwrap_or_else(|| {
+            if T::ZARR_TYPE.has_endianness() {
+                panic!("Endianness undefined for dtype which requires it (multi-byte, not raw)");
             }
-        };
+            Default::default()
+        });
         T::write_array_to(decoded, w, endian).unwrap();
     }
 
@@ -86,15 +83,12 @@ impl ABCodec for BytesCodec {
         if &T::ZARR_TYPE != decoded_repr.data_type() {
             panic!("Decoded array is not of the reflected type");
         }
-        let endian = match self.endian {
-            Some(e) => e,
-            None => {
-                if T::ZARR_TYPE.has_endianness() {
-                    panic!("Endianness undefined for dtype which requires it");
-                }
-                Default::default()
+        let endian = self.endian.unwrap_or_else(|| {
+            if T::ZARR_TYPE.has_endianness() {
+                panic!("Endianness undefined for dtype which requires it (multi-byte, not raw)");
             }
-        };
+            Default::default()
+        });
         let shape: CoordVec<_> = decoded_repr.shape.iter().map(|s| *s as usize).collect();
         T::read_array_from(r, endian, shape.as_slice())
     }
