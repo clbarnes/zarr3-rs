@@ -18,11 +18,19 @@ use std::io::{SeekFrom, Write};
 use super::bytes_codec::Endian;
 use super::{ABCodec, ABCodecType};
 
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum IndexLocation {
+    Start,
+    End,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ShardingIndexedCodec {
     pub chunk_shape: GridCoord,
     pub codecs: CodecChain,
     pub index_codecs: CodecChain,
+    pub index_location: IndexLocation,
 }
 
 pub struct ShardingIndex {
@@ -105,11 +113,12 @@ impl Ndim for ShardingIndexedCodec {
 }
 
 impl ShardingIndexedCodec {
-    pub fn new<C: Into<GridCoord>>(chunk_shape: C) -> Self {
+    pub fn new<C: Into<GridCoord>>(chunk_shape: C, index_location: IndexLocation) -> Self {
         Self {
             chunk_shape: chunk_shape.into(),
             codecs: CodecChain::default(),
             index_codecs: CodecChain::default(),
+            index_location,
         }
     }
 
@@ -576,7 +585,7 @@ mod tests {
 
     #[test]
     fn roundtrip_shard_simple() {
-        let codec = ShardingIndexedCodec::new(smallvec![10, 20]);
+        let codec = ShardingIndexedCodec::new(smallvec![10, 20], IndexLocation::End);
         let arr = make_arr();
         let arr1 = arr.clone();
         let mut buf = Cursor::new(Vec::<u8>::default());
@@ -593,7 +602,7 @@ mod tests {
     fn roundtrip_shard_complex() {
         use crate::codecs::bb::gzip_codec::GzipCodec;
 
-        let mut codec = ShardingIndexedCodec::new(smallvec![10, 20]);
+        let mut codec = ShardingIndexedCodec::new(smallvec![10, 20], IndexLocation::End);
         codec
             .codecs
             .aa_codecs_mut()
