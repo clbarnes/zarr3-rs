@@ -1,9 +1,20 @@
-use std::fmt::Display;
+use std::cell::OnceCell;
+use std::{
+    fmt::{Display, Write},
+    num::ParseIntError,
+    str::FromStr,
+};
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use serde_with::serde_as;
 
 use super::NBytes;
+
+// todo: this is probably not worth the complexity:
+// infrequent, and `from_bits` is probably fast
+const NAN32: OnceCell<f32> = OnceCell::new();
+const NAN64: OnceCell<f64> = OnceCell::new();
 
 /// Zarr's default 32-bit float NaN.
 ///
@@ -13,7 +24,7 @@ use super::NBytes;
 /// and only the first bit of the mantissa is 1.
 fn nan32() -> f32 {
     // sign bit is 0, all 8 exponent bits are 1, first mantissa bit is 1, rest are 0
-    f32::from_bits(0b0111_1111__1100_0000__0000_0000__0000_0000)
+    *NAN32.get_or_init(|| f32::from_bits(0b0111_1111__1100_0000__0000_0000__0000_0000))
 }
 
 /// Zarr's default 64-bit float NaN.
@@ -24,9 +35,11 @@ fn nan32() -> f32 {
 /// and only the first bit of the mantissa is 1.
 fn nan64() -> f64 {
     // sign bit is 0, all 11 exponent bits are 1, first mantissa bit is 1, rest are 0
-    f64::from_bits(
+    *NAN64.get_or_init(|| {
+        f64::from_bits(
         0b0111_1111__1111_1000__0000_0000__0000_0000__0000_0000__0000_0000__0000_0000__0000_0000,
     )
+    })
 }
 
 #[serde_as]
@@ -67,6 +80,7 @@ impl NBytes for FloatSize {
     }
 }
 
+// todo: if this needs to be exposed, make private and wrap in a struct to control construction
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SpecialF32 {
     NaN,
@@ -76,7 +90,7 @@ enum SpecialF32 {
     Bytes([u8; 4]),
 }
 
-pub fn decode_hex<const B: usize>(s: &str) -> Result<[u8; B], ParseIntError> {
+fn decode_hex<const B: usize>(s: &str) -> Result<[u8; B], ParseIntError> {
     let mut out = [0; B];
     for (idx, val) in (0..s.len())
         .step_by(2)
@@ -88,7 +102,7 @@ pub fn decode_hex<const B: usize>(s: &str) -> Result<[u8; B], ParseIntError> {
     Ok(out)
 }
 
-pub fn encode_hex(bytes: &[u8]) -> String {
+fn encode_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(2 + bytes.len() * 2);
     write!(&mut s, "0x").unwrap();
     for &b in bytes {
@@ -123,7 +137,7 @@ impl ToString for SpecialF32 {
             Infinity => "Infinity".to_owned(),
             NegInfinity => "-Infinity".to_owned(),
             Value(v) => format!("{:#06X?}", v.to_be_bytes()),
-            Bytes(b) => format!("{:#06X?}", b),
+            Bytes(b) => encode_hex(b),
         }
     }
 }
@@ -189,15 +203,52 @@ mod tests {
     #[test]
     fn check_nan32() {
         // WARNING: might break on different endian platform
-        let n32 = nan32();
+        let nan = nan32();
+        assert!(nan.is_nan());
         // bytes values from spec
         let reference_u32 = u32::from_str_radix("7fc00000", 16).unwrap();
-        assert_eq!(n32.to_bits(), reference_u32);
-        assert!(n32.is_nan());
+        assert_eq!(nan.to_bits(), reference_u32);
+    }
+
+    #[test]
+    fn into_from_f32() {
+        for (f, sf) in vec![
+            (1.0f32, SpecialF32::Value(1.0)),
+            (f32::INFINITY, SpecialF32::Infinity),
+            (f32::NEG_INFINITY, SpecialF32::NegInfinity),
+        ] {
+            let f2: f32 = sf.into();
+            assert_eq!(f, f2);
+            let sf2: SpecialF32 = f.into();
+            assert_eq!(sf, sf2);
+        }
+        let sf: SpecialF32 = f32::NAN.into();
+        let f2: f32 = sf.into();
+        assert_eq!(f32::NAN.to_bits(), f2.to_bits())
+    }
+
+    #[test]
+    fn ser_f32() {
+        for (s, f) in vec![
+            (r#""Infinity""#, f32::INFINITY),
+            (r#""-Infinity""#, f32::NEG_INFINITY),
+            (r#"1.0"#, 1.0f32),
+            (r#""NaN""#, nan32()),
+            (
+                r#""0x7fc00001""#,
+                f32::from_bits(0b0111_1111__1100_0000__0000_0000__0000_0001),
+            ),
+        ] {
+            let sf: SpecialF32 = f.into();
+            let s2 = serde_json::to_string(&sf).unwrap();
+
+            assert_eq!(s2, s);
+        }
     }
 
     #[test]
     fn check_nan64_isnan() {
-        assert!(nan64().is_nan());
+        let nan = nan64();
+        assert!(nan.is_nan());
     }
 }
