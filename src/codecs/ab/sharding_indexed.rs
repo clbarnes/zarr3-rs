@@ -15,6 +15,7 @@ use crate::{ArcArrayD, CoordVec, GridCoord, MaybeNdim, Ndim};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{SeekFrom, Write};
 
+use super::bytes_codec::Endian;
 use super::{ABCodec, ABCodecType};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -564,7 +565,7 @@ impl ChunkSpec {
 
 #[cfg(test)]
 mod tests {
-    use crate::codecs::{aa::TransposeCodec, ab::endian::EndianCodec};
+    use crate::codecs::{aa::TransposeCodec, ab::bytes_codec::BytesCodec};
 
     use super::*;
     use smallvec::smallvec;
@@ -596,8 +597,8 @@ mod tests {
         codec
             .codecs
             .aa_codecs_mut()
-            .push(TransposeCodec::new_f().into());
-        codec.codecs.replace_ab_codec(EndianCodec::new_big());
+            .push(TransposeCodec::new_transpose(2).into());
+        codec.codecs.replace_ab_codec(BytesCodec::new_big());
         codec
             .codecs
             .bb_codecs_mut()
