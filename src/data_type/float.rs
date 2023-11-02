@@ -42,21 +42,3 @@ impl NBytes for FloatSize {
         }
     }
 }
-
-// enum SpecialF32 {
-//     NaN,
-//     Infinity,
-//     NegInfinity,
-//     Value(f32),
-//     Bytes([u8; 4]),
-// }
-
-// impl Into
-
-// enum SpecialF64 {
-//     NaN,
-//     Infinity,
-//     NegInfinity,
-//     Value(f64),
-//     Bytes([u8; 8]),
-// }
