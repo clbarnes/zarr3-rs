@@ -299,7 +299,7 @@ mod tests {
                 AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
                 AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
             ],
-            ABCodecType::Endian(BytesCodec::new_big()),
+            ABCodecType::Bytes(BytesCodec::new_big()),
             vec![
                 BBCodecType::Gzip(GzipCodec::default()),
                 BBCodecType::Gzip(GzipCodec::from_level(2).unwrap()),

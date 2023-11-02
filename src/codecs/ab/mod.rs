@@ -56,7 +56,7 @@ impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
 #[serde(rename_all = "snake_case", tag = "name", content = "configuration")]
 // #[enum_delegate::implement(ABCodec)]
 pub enum ABCodecType {
-    Endian(BytesCodec),
+    Bytes(BytesCodec),
     // box is necessary as sharding codec contains codecs,
     // so it's a recursive enum of potentially infinite size
     // ShardingIndexed(Box<ShardingIndexedCodec>),
@@ -65,21 +65,21 @@ pub enum ABCodecType {
 impl ABCodec for ABCodecType {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
         match self {
-            Self::Endian(c) => c.encode(decoded, w),
+            Self::Bytes(c) => c.encode(decoded, w),
             // Self::ShardingIndexed(c) => c.encode(decoded, w),
         }
     }
 
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T> {
         match self {
-            Self::Endian(c) => c.decode(r, decoded_repr),
+            Self::Bytes(c) => c.decode(r, decoded_repr),
             // Self::ShardingIndexed(c) => c.decode(r, decoded_repr),
         }
     }
 
     fn endian(&self) -> Option<Endian> {
         match self {
-            Self::Endian(c) => c.endian(),
+            Self::Bytes(c) => c.endian(),
             // Self::ShardingIndexed(c) => c.endian(),
         }
     }
@@ -88,7 +88,7 @@ impl ABCodec for ABCodecType {
 impl MaybeNdim for ABCodecType {
     fn maybe_ndim(&self) -> Option<usize> {
         match self {
-            Self::Endian(c) => c.maybe_ndim(),
+            Self::Bytes(c) => c.maybe_ndim(),
             // Self::ShardingIndexed(c) => c.maybe_ndim(),
         }
     }
@@ -96,11 +96,11 @@ impl MaybeNdim for ABCodecType {
 
 impl Default for ABCodecType {
     fn default() -> Self {
-        Self::Endian(BytesCodec::default())
+        Self::Bytes(BytesCodec::default())
     }
 }
 
-variant_from_data!(ABCodecType, Endian, BytesCodec);
+variant_from_data!(ABCodecType, Bytes, BytesCodec);
 
 // impl From<ShardingIndexedCodec> for ABCodecType {
 //     fn from(c: ShardingIndexedCodec) -> Self {

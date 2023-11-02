@@ -140,7 +140,7 @@ mod tests {
             },
             "codecs": [
                 {
-                    "name": "endian",
+                    "name": "bytes",
                     "configuration": {"endian": "little"}
                 },
                 {
