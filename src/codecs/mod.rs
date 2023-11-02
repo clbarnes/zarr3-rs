@@ -21,7 +21,7 @@ use crate::{
     ArcArrayD, GridCoord, MaybeNdim,
 };
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct CodecChain {
     pub aa_codecs: Vec<AACodecType>,
     pub ab_codec: ABCodecType,
@@ -100,12 +100,6 @@ impl MaybeNdim for CodecChain {
             }
         }
         Ok(())
-    }
-}
-
-impl Default for CodecChain {
-    fn default() -> Self {
-        Self::new(Vec::default(), Default::default(), Vec::default())
     }
 }
 
