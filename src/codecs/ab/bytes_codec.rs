@@ -70,12 +70,7 @@ impl BytesCodec {
 
 impl ABCodec for BytesCodec {
     fn encode<T: ReflectedType, W: Write>(&self, decoded: ArcArrayD<T>, w: W) {
-        let endian = self.endian.unwrap_or_else(|| {
-            if T::ZARR_TYPE.has_endianness() {
-                panic!("Endianness undefined for dtype which requires it (multi-byte, not raw)");
-            }
-            Default::default()
-        });
+        let endian = self.valid_endian::<T>().unwrap();
         T::write_array_to(decoded, w, endian).unwrap();
     }
 
