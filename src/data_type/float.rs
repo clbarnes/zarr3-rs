@@ -5,6 +5,30 @@ use serde_with::serde_as;
 
 use super::NBytes;
 
+/// Zarr's default 32-bit float NaN.
+///
+/// Like all NaNs, all bits of the exponent are 1,
+/// and at least one bit of the mantissa is also 1.
+/// In this NaN, the sign bit is 0,
+/// and only the first bit of the mantissa is 1.
+fn nan32() -> f32 {
+    // sign bit is 0, all 8 exponent bits are 1, first mantissa bit is 1, rest are 0
+    f32::from_bits(0b0111_1111__1100_0000__0000_0000__0000_0000)
+}
+
+/// Zarr's default 64-bit float NaN.
+///
+/// Like all NaNs, all bits of the exponent are 1,
+/// and at least one bit of the mantissa is also 1.
+/// In this NaN, the sign bit is 0,
+/// and only the first bit of the mantissa is 1.
+fn nan64() -> f64 {
+    // sign bit is 0, all 11 exponent bits are 1, first mantissa bit is 1, rest are 0
+    f64::from_bits(
+        0b0111_1111__1111_1000__0000_0000__0000_0000__0000_0000__0000_0000__0000_0000__0000_0000,
+    )
+}
+
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -82,7 +106,7 @@ impl FromStr for SpecialF32 {
             "Infinity" => Self::Infinity,
             "-Infinity" => Self::NegInfinity,
             s if s.starts_with("0x") && s.len() == 10 => {
-                let b = decode_hex::<4>(&s[2..]).map_err(|e| "Could not parse hex")?;
+                let b = decode_hex::<4>(&s[2..]).map_err(|_e| "Could not parse hex")?;
                 Self::Value(f32::from_be_bytes(b))
             }
             _ => return Err("Could not parse SpecialF32"),
@@ -128,7 +152,7 @@ fn deser_f32<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error
 impl Into<f32> for SpecialF32 {
     fn into(self) -> f32 {
         match self {
-            Self::NaN => f32::NAN,
+            Self::NaN => nan32(),
             Self::Infinity => f32::INFINITY,
             Self::NegInfinity => f32::NEG_INFINITY,
             Self::Value(f) => f,
@@ -141,11 +165,10 @@ impl Into<SpecialF32> for f32 {
     fn into(self) -> SpecialF32 {
         use SpecialF32::*;
         if self.is_nan() {
-            let b = self.to_be_bytes();
-            if b == f32::NAN.to_be_bytes() {
+            if self.to_bits() == nan32().to_bits() {
                 NaN
             } else {
-                Bytes(b)
+                Bytes(self.to_be_bytes())
             }
         } else if self.is_infinite() {
             if self.is_sign_negative() {
@@ -156,5 +179,25 @@ impl Into<SpecialF32> for f32 {
         } else {
             Value(self)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_nan32() {
+        // WARNING: might break on different endian platform
+        let n32 = nan32();
+        // bytes values from spec
+        let reference_u32 = u32::from_str_radix("7fc00000", 16).unwrap();
+        assert_eq!(n32.to_bits(), reference_u32);
+        assert!(n32.is_nan());
+    }
+
+    #[test]
+    fn check_nan64_isnan() {
+        assert!(nan64().is_nan());
     }
 }
