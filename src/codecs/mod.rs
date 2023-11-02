@@ -67,37 +67,39 @@ impl CodecChain {
         self.aa_codecs.len() + self.bb_codecs.len() + 1
     }
 
+    // pub(crate) fn iter_ndims<'a>(&self) -> impl Iterator<Item = usize> + '_ {
+    //     self.aa_codecs
+    //         .iter()
+    //         .filter_map(|c| c.maybe_ndim())
+    //         .chain(self.ab_codec.maybe_ndim().iter().cloned())
+    // }
+
     // pub fn validate_index(&self) -> Result<()> {}
 }
 
 impl MaybeNdim for CodecChain {
     fn maybe_ndim(&self) -> Option<usize> {
-        for c in self.aa_codecs.iter() {
-            if let Some(n) = c.maybe_ndim() {
-                return Some(n);
-            }
-        }
-        if let Some(n) = self.ab_codec.maybe_ndim() {
-            return Some(n);
-        }
-        // BB codecs can't have dimensionality
-        None
+        self.aa_codecs
+            .iter()
+            .filter_map(|c| c.maybe_ndim())
+            .next()
+            .or_else(|| self.ab_codec.maybe_ndim())
     }
 
     fn validate_ndim(&self) -> Result<(), &'static str> {
-        let mut ndims = HashSet::with_capacity(self.len());
+        let mut ndims = HashSet::with_capacity(2);
 
-        for ndim in self.aa_codecs.iter().filter_map(|c| c.maybe_ndim()) {
-            ndims.insert(ndim);
+        for n in self
+            .aa_codecs
+            .iter()
+            .filter_map(|c| c.maybe_ndim())
+            .chain(self.ab_codec.maybe_ndim().iter().cloned())
+        {
+            if ndims.insert(n) && ndims.len() > 1 {
+                return Err("Inconsistent codec dimensionalities");
+            }
         }
-        if let Some(n) = self.ab_codec.maybe_ndim() {
-            ndims.insert(n);
-        }
-        if ndims.len() > 1 {
-            Err("Inconsistent codec dimensionalities")
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
 
@@ -154,6 +156,10 @@ impl ABCodec for CodecChain {
         let bb_r = self.bb_codecs.as_slice().decoder(r);
         let arr = self.ab_codec().decode::<T, _>(bb_r, ab_repr);
         self.aa_codecs.as_slice().decode(arr)
+    }
+
+    fn endian(&self) -> Option<ab::bytes_codec::Endian> {
+        self.ab_codec.endian()
     }
 }
 
@@ -250,7 +256,7 @@ impl<T: ReflectedType> From<GridCoord> for ArrayRepr<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::codecs::ab::endian::EndianCodec;
+    use crate::codecs::ab::bytes_codec::BytesCodec;
     use crate::codecs::bb::gzip_codec::GzipCodec;
     use crate::ArcArrayD;
 
@@ -289,11 +295,11 @@ mod tests {
         let arr = make_arr();
         let chain = CodecChain::new(
             vec![
-                AACodecType::Transpose(TransposeCodec::new_f()),
-                AACodecType::Transpose(TransposeCodec::new_f()),
-                AACodecType::Transpose(TransposeCodec::new_f()),
+                AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
+                AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
+                AACodecType::Transpose(TransposeCodec::new_transpose(SHAPE.len())),
             ],
-            ABCodecType::Endian(EndianCodec::new_big()),
+            ABCodecType::Endian(BytesCodec::new_big()),
             vec![
                 BBCodecType::Gzip(GzipCodec::default()),
                 BBCodecType::Gzip(GzipCodec::from_level(2).unwrap()),

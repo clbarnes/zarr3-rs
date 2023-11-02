@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 /// Read the entire stream as if it were a payload with a u32le crc32c checksum suffix.
 ///
 /// Return the payload, or an error if the checksum does not match.
-fn validate_crc32c<'a, R: Read>(mut r: R) -> io::Result<Vec<u8>> {
+fn validate_crc32c<R: Read>(mut r: R) -> io::Result<Vec<u8>> {
     let mut buf = Vec::default();
     let end = r.read_to_end(&mut buf)?;
     if end < 4 {

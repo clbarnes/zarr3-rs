@@ -4,135 +4,47 @@ use std::{
     str::FromStr,
 };
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
-
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
 
-use crate::{codecs::ab::endian::Endian, ArcArrayD};
+use crate::{codecs::ab::bytes_codec::Endian, ArcArrayD};
+mod complex;
+mod raw;
+
+pub use complex::{c128, c64, ComplexSize};
+mod int;
+pub use int::IntSize;
+mod float;
+pub use float::FloatSize;
 
 pub trait NBytes {
+    // todo - might need variable at some point
+    /// Number of bytes in the data type
     fn nbytes(&self) -> usize;
 
+    /// Number of bits in the data type
     fn nbits(&self) -> usize {
         self.nbytes() * 8
     }
 
+    /// Whether the data type should have an endianness.
     fn has_endianness(&self) -> bool {
         self.nbytes() > 1
     }
-}
 
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum IntSize {
-    b8,
-    b16,
-    b32,
-    b64,
-}
-
-impl TryFrom<usize> for IntSize {
-    type Error = &'static str;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        match value {
-            8 => Ok(Self::b8),
-            16 => Ok(Self::b16),
-            32 => Ok(Self::b32),
-            64 => Ok(Self::b64),
-            _ => Err("not a valid integer size"),
-        }
-    }
-}
-
-impl Display for IntSize {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.nbits())
-    }
-}
-
-impl NBytes for IntSize {
-    fn nbytes(&self) -> usize {
-        match self {
-            Self::b8 => 1,
-            Self::b16 => 2,
-            Self::b32 => 4,
-            Self::b64 => 8,
-        }
-    }
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum FloatSize {
-    // b16,
-    b32,
-    b64,
-}
-
-impl Display for FloatSize {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.nbits())
-    }
-}
-
-impl TryFrom<usize> for FloatSize {
-    type Error = &'static str;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        match value {
-            // 16 => Ok(Self::b16),
-            32 => Ok(Self::b32),
-            64 => Ok(Self::b64),
-            _ => Err("not a valid float size"),
-        }
-    }
-}
-
-impl NBytes for FloatSize {
-    fn nbytes(&self) -> usize {
-        match self {
-            // Self::b16 => 2,
-            Self::b32 => 4,
-            Self::b64 => 8,
-        }
-    }
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum ComplexSize {
-    b64,
-    b128,
-}
-
-impl Display for ComplexSize {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.nbits())
-    }
-}
-
-impl TryFrom<usize> for ComplexSize {
-    type Error = &'static str;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        match value {
-            64 => Ok(Self::b64),
-            128 => Ok(Self::b128),
-            _ => Err("not a valid complex size"),
-        }
-    }
-}
-
-impl NBytes for ComplexSize {
-    fn nbytes(&self) -> usize {
-        match self {
-            Self::b64 => 8,
-            Self::b128 => 16,
+    /// A valid endianness for this data type.
+    ///
+    /// Uses the given endianness if [Some], or a meaningless default if the data type does not require one (e.g. single-byte) and [None] is given, or an error if an endianness is needed but not given.
+    fn valid_endian(&self, endian: Option<Endian>) -> Result<Endian, &'static str> {
+        match endian {
+            Some(e) => Ok(e),
+            None => {
+                if self.has_endianness() {
+                    Err("Endianness undefined for dtype which requires it (multi-byte, not raw)")
+                } else {
+                    Ok(Default::default())
+                }
+            }
         }
     }
 }
@@ -142,8 +54,6 @@ pub struct UnknownDataType {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     configuration: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fallback: Option<Box<ExtensibleDataType>>,
 }
 
 // Adding extensions to this enum makes ser/deser much harder;
@@ -165,13 +75,7 @@ impl TryFrom<ExtensibleDataType> for DataType {
     fn try_from(value: ExtensibleDataType) -> Result<Self, Self::Error> {
         match value {
             ExtensibleDataType::Known(d) => Ok(d),
-            ExtensibleDataType::Unknown(u) => {
-                if let Some(f) = u.fallback {
-                    (*f).try_into()
-                } else {
-                    Err("Extension datatype has no known fallback")
-                }
-            }
+            ExtensibleDataType::Unknown(_) => Err("Unknown data type"),
         }
     }
 }
@@ -253,8 +157,6 @@ impl DataType {
 
 // todo: as extension dtypes are added, we can either separate by
 // known/unknown or core/ extension.
-// Extension must continue to support unknown with fallbacks,
-// which is tricky to ser/deser.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ExtensibleDataType {
@@ -358,10 +260,8 @@ impl FromStr for DataType {
     type Err = &'static str;
 }
 
-#[allow(non_camel_case_types)]
-pub type c64 = num_complex::Complex32;
-#[allow(non_camel_case_types)]
-pub type c128 = num_complex::Complex64;
+type PrimitiveEncoder<T> = Box<dyn Fn(T, &mut [u8])>;
+type PrimitiveDecoder<T> = Box<dyn Fn(&mut [u8]) -> T>;
 
 /// Trait implemented by primitive types that are reflected in Zarr.
 ///
@@ -388,11 +288,11 @@ pub trait ReflectedType:
     // this is to avoid a match in a hot loop but the Box deref might be slower anyway?
     /// Produce a routine which writes the bytes of a self-typed value
     /// into the given buffer.
-    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])>;
+    fn encoder(endian: Endian) -> PrimitiveEncoder<Self>;
 
     /// Produce a routine which reads a self-typed value from
     /// the given byte buffer.
-    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self>;
+    fn decoder(endian: Endian) -> PrimitiveDecoder<Self>;
 
     // todo: replace array reading/writing with these
     // use bufreader & bufwriter, read however many bytes we need for a single item, use std (to|from)_[lb]e_bytes
@@ -403,7 +303,7 @@ pub trait ReflectedType:
 
         for val in array.into_iter() {
             encoder(val, buf.as_mut());
-            bw.write(buf.as_mut()).unwrap();
+            bw.write_all(buf.as_mut()).unwrap();
         }
         bw.flush()
     }
@@ -439,23 +339,31 @@ macro_rules! reflected_primitive {
             const ZARR_TYPE: DataType = $d_name;
 
             fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
+                use byteorder::ByteOrder;
                 Box::new(match endian {
-                    Endian::Big => |v: Self, buf: &mut [u8]| BigEndian::$bo_write_fn(buf, v),
-                    Endian::Little => |v: Self, buf: &mut [u8]| LittleEndian::$bo_write_fn(buf, v),
+                    Endian::Big => {
+                        |v: Self, buf: &mut [u8]| byteorder::BigEndian::$bo_write_fn(buf, v)
+                    }
+                    Endian::Little => {
+                        |v: Self, buf: &mut [u8]| byteorder::LittleEndian::$bo_write_fn(buf, v)
+                    }
                 })
             }
 
             /// Produce a routine which reads a self-typed value from
             /// the given byte buffer.
             fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
+                use byteorder::ByteOrder;
                 Box::new(match endian {
-                    Endian::Big => |buf: &mut [u8]| BigEndian::$bo_read_fn(buf),
-                    Endian::Little => |buf: &mut [u8]| LittleEndian::$bo_read_fn(buf),
+                    Endian::Big => |buf: &mut [u8]| byteorder::BigEndian::$bo_read_fn(buf),
+                    Endian::Little => |buf: &mut [u8]| byteorder::LittleEndian::$bo_read_fn(buf),
                 })
             }
         }
     };
 }
+
+pub(crate) use reflected_primitive;
 
 impl ReflectedType for bool {
     const ZARR_TYPE: DataType = DataType::Bool;
@@ -469,131 +377,14 @@ impl ReflectedType for bool {
     }
 }
 
-impl ReflectedType for u8 {
-    const ZARR_TYPE: DataType = DataType::UInt(IntSize::b8);
-
-    fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-        Box::new(|v: Self, buf: &mut [u8]| buf[0] = v)
-    }
-
-    fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        Box::new(|buf: &mut [u8]| buf[0])
-    }
-}
-
-impl ReflectedType for i8 {
-    const ZARR_TYPE: DataType = DataType::UInt(IntSize::b8);
-
-    fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-        Box::new(|v: Self, mut buf: &mut [u8]| buf.write_i8(v).unwrap())
-    }
-
-    fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        // todo: kludge to get type bounds to work, should be a better way
-        Box::new(|buf: &mut [u8]| Self::from_le_bytes([buf[0]]))
-    }
-}
-
+reflected_primitive!(DataType::Float(FloatSize::b32), f32, read_f32, write_f32);
+reflected_primitive!(DataType::Float(FloatSize::b64), f64, read_f64, write_f64);
 reflected_primitive!(DataType::UInt(IntSize::b16), u16, read_u16, write_u16);
 reflected_primitive!(DataType::UInt(IntSize::b32), u32, read_u32, write_u32);
 reflected_primitive!(DataType::UInt(IntSize::b64), u64, read_u64, write_u64);
 reflected_primitive!(DataType::Int(IntSize::b16), i16, read_i16, write_i16);
 reflected_primitive!(DataType::Int(IntSize::b32), i32, read_i32, write_i32);
 reflected_primitive!(DataType::Int(IntSize::b64), i64, read_i64, write_i64);
-reflected_primitive!(DataType::Float(FloatSize::b32), f32, read_f32, write_f32);
-reflected_primitive!(DataType::Float(FloatSize::b64), f64, read_f64, write_f64);
-
-impl ReflectedType for c64 {
-    const ZARR_TYPE: DataType = DataType::Complex(ComplexSize::b64);
-
-    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-        Box::new(match endian {
-            Endian::Big => |v: Self, mut buf: &mut [u8]| {
-                buf.write_f32::<BigEndian>(v.re).unwrap();
-                buf.write_f32::<BigEndian>(v.im).unwrap();
-            },
-            Endian::Little => |v, mut buf| {
-                buf.write_f32::<LittleEndian>(v.re).unwrap();
-                buf.write_f32::<LittleEndian>(v.im).unwrap();
-            },
-        })
-    }
-
-    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        Box::new(match endian {
-            Endian::Big => |buf| {
-                let re = BigEndian::read_f32(buf);
-                let im = BigEndian::read_f32(buf);
-                Self::new(re, im)
-            },
-            Endian::Little => |buf| {
-                let re = LittleEndian::read_f32(buf);
-                let im = LittleEndian::read_f32(buf);
-                Self::new(re, im)
-            },
-        })
-    }
-}
-
-impl ReflectedType for c128 {
-    const ZARR_TYPE: DataType = DataType::Complex(ComplexSize::b64);
-
-    fn encoder(endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-        Box::new(match endian {
-            Endian::Big => |v: Self, mut buf: &mut [u8]| {
-                buf.write_f64::<BigEndian>(v.re).unwrap();
-                buf.write_f64::<BigEndian>(v.im).unwrap();
-            },
-            Endian::Little => |v, mut buf| {
-                buf.write_f64::<LittleEndian>(v.re).unwrap();
-                buf.write_f64::<LittleEndian>(v.im).unwrap();
-            },
-        })
-    }
-
-    fn decoder(endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-        Box::new(match endian {
-            Endian::Big => |buf| {
-                let re = BigEndian::read_f64(buf);
-                let im = BigEndian::read_f64(buf);
-                Self::new(re, im)
-            },
-            Endian::Little => |buf| {
-                let re = LittleEndian::read_f64(buf);
-                let im = LittleEndian::read_f64(buf);
-                Self::new(re, im)
-            },
-        })
-    }
-}
-
-macro_rules! reflected_raw {
-    ($($nbytes:expr), *) => {
-        $(
-        impl ReflectedType for [u8; $nbytes] {
-            const ZARR_TYPE: DataType = DataType::Raw($nbytes * 8);
-
-            fn encoder(_endian: Endian) -> Box<dyn Fn(Self, &mut [u8])> {
-                Box::new(|v: Self, buf: &mut[u8]| {
-                    buf.copy_from_slice(&v);
-                })
-            }
-
-            /// Produce a routine which reads a self-typed value from
-            /// the given byte buffer.
-            fn decoder(_endian: Endian) -> Box<dyn Fn(&mut [u8]) -> Self> {
-                Box::new(|buf: &mut[u8]| {
-                    let mut out = [0; $nbytes];
-                    out.as_mut().copy_from_slice(buf);
-                    out
-                })
-            }
-        }
-    )*
-    }
-}
-
-reflected_raw!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
 
 #[cfg(test)]
 mod tests {
@@ -636,15 +427,13 @@ mod tests {
     fn parse_unknown() {
         use ExtensibleDataType::*;
 
-        let s = r#"{"name":"newtype","fallback":"uint8"}"#;
+        let s = r#"{"name":"newtype"}"#;
         let dt: ExtensibleDataType =
             serde_json::from_str(s).unwrap_or_else(|_| panic!("Couldn't parse '{}'", s));
         match &dt {
             Unknown(d) => assert_eq!(d.name, "newtype"),
             _ => panic!("got wrong dtype"),
         };
-        let d: DataType = dt.try_into().expect("Could not fall back");
-        assert_eq!(d, DataType::UInt(IntSize::b8));
     }
 
     #[test]
@@ -727,5 +516,34 @@ mod tests {
             <[u8; 16]>::default(),
             serde_json::from_value::<[u8; 16]>(DataType::Raw(128).default_fill_value()).unwrap()
         );
+    }
+
+    #[test]
+    fn can_validate_endian() {
+        for dt in vec![
+            DataType::Bool,
+            DataType::UInt(IntSize::b8),
+            DataType::Int(IntSize::b8),
+            DataType::Raw(1),
+            DataType::Raw(2),
+            DataType::Raw(4),
+        ] {
+            for e in vec![Endian::Little, Endian::Big] {
+                dt.valid_endian(Some(e)).unwrap();
+            }
+            dt.valid_endian(None).unwrap();
+        }
+
+        for dt in vec![
+            DataType::UInt(IntSize::b16),
+            DataType::Int(IntSize::b32),
+            DataType::Float(FloatSize::b32),
+            DataType::Complex(ComplexSize::b64),
+        ] {
+            for e in vec![Endian::Little, Endian::Big] {
+                dt.valid_endian(Some(e)).unwrap();
+            }
+            assert!(dt.valid_endian(None).is_err());
+        }
     }
 }

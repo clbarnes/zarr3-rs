@@ -6,4 +6,4 @@ Based heavily on an earlier prototype at [sci-rs/zarr](https://github.com/sci-rs
 
 ## Usage
 
-See [`examples/roundtrip.rs`](examples/roundtrip.rs) for an example.
+See [`examples/roundtrip.rs`](examples/roundtrip.rs) for an example (and `cargo run --example roundtrip` to run it).

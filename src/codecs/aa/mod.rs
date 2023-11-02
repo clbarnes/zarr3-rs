@@ -67,7 +67,6 @@ mod test {
     use super::*;
     use serde_json;
     use smallvec::smallvec;
-    use transpose::Order;
 
     #[test]
     fn roundtrip_aacodec_transpose() {
@@ -76,15 +75,12 @@ mod test {
             serde_json::from_str(s).expect("Could not deser AACodecType::Transpose");
         assert_eq!(
             aa,
-            AACodecType::Transpose(TransposeCodec::new_permutation(smallvec![1, 2, 0]).unwrap())
+            AACodecType::Transpose(TransposeCodec::new(smallvec![1, 2, 0]).unwrap())
         );
 
-        let s = r#"{"name": "transpose", "configuration": {"order": "C"}}"#;
+        let s = r#"{"name": "transpose", "configuration": {"order": [2, 1, 0]}}"#;
         let aa: AACodecType =
             serde_json::from_str(s).expect("Could not deser AACodecType::Transpose");
-        assert_eq!(
-            aa,
-            AACodecType::Transpose(TransposeCodec { order: Order::C })
-        );
+        assert_eq!(aa, AACodecType::Transpose(TransposeCodec::new_transpose(3)));
     }
 }

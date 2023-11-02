@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     chunk_grid::{ArrayRegion, ChunkGrid, ChunkGridType},
+    data_type::NBytes,
     to_usize,
     util::DimensionMismatch,
 };
@@ -156,6 +157,7 @@ impl ArrayMetadata {
         );
         out.try_understand_extensions()?;
         out.validate_dimensions()?;
+        out.validate_codecs()?;
         Ok(out)
     }
 
@@ -180,6 +182,12 @@ impl ArrayMetadata {
         Ok(())
     }
 
+    /// Check that codecs are consistent with other metadata.
+    pub fn validate_codecs(&self) -> Result<(), &'static str> {
+        self.data_type.valid_endian(self.codecs.endian())?;
+        Ok(())
+    }
+
     pub fn get_effective_fill_value<T: ReflectedType>(&self) -> Result<T, &'static str> {
         if T::ZARR_TYPE != self.data_type {
             return Err("Reflected type mismatches array data type");
@@ -188,6 +196,7 @@ impl ArrayMetadata {
             .map_err(|_| "Could not deserialize fill value")
     }
 
+    /// Panics on dimension mismatch
     pub fn chunk_should_exist(&self, chunk: &GridCoord) -> bool {
         DimensionMismatch::check_coords(chunk.len(), self.ndim()).unwrap();
         self.chunk_should_exist_unchecked(chunk)
@@ -300,6 +309,7 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
     pub fn ab_codec<C: Into<ABCodecType>>(mut self, codec: C) -> Result<Self, &'static str> {
         let c = codec.into();
         self.union_ndim(&c)?;
+        c.valid_endian::<T>()?;
         self.codecs.replace_ab_codec(c);
         Ok(self)
     }
@@ -654,7 +664,7 @@ impl<'s, S: WriteableStore, T: ReflectedType> Array<'s, S, T> {
 mod tests {
     use crate::{
         chunk_key_encoding::V2ChunkKeyEncoding,
-        codecs::{aa::TransposeCodec, ab::endian::EndianCodec, bb::gzip_codec::GzipCodec},
+        codecs::{aa::TransposeCodec, ab::bytes_codec::BytesCodec, bb::gzip_codec::GzipCodec},
     };
 
     use super::ArrayMetadataBuilder;
@@ -667,9 +677,9 @@ mod tests {
             .unwrap()
             .chunk_key_encoding(V2ChunkKeyEncoding::default())
             .fill_value(1.0)
-            .push_aa_codec(TransposeCodec::new_f())
+            .push_aa_codec(TransposeCodec::new_transpose(3))
             .unwrap()
-            .ab_codec(EndianCodec::new_little())
+            .ab_codec(BytesCodec::new_little())
             .unwrap()
             .push_bb_codec(GzipCodec::default())
             .dimension_names(smallvec![

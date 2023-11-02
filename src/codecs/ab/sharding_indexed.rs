@@ -205,6 +205,10 @@ impl ABCodec for ShardingIndexedCodec {
         }
         arr
     }
+
+    fn endian(&self) -> Option<Endian> {
+        self.codecs.endian()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
