@@ -53,6 +53,7 @@ crc32c = "0.6.4"
 # bzip2 = { version = "0.4", optional = true }
 
 [dev-dependencies]
+anyhow = "1.0.75"
 cargo-release = "0.24.10"
 tempdir = "0.3.7"
 

@@ -218,7 +218,7 @@ mod tests {
             let ameta = ArrayMetadataBuilder::<f32>::new(&[30, 40])
                 .chunk_grid(vec![5, 10].as_slice())
                 .unwrap()
-                .build();
+                .into();
 
             let arr = g2
                 .create_array::<f32>("array".parse().unwrap(), ameta)
@@ -262,7 +262,7 @@ mod tests {
             let ameta = ArrayMetadataBuilder::<i32>::new(&[4, 4])
                 .chunk_grid(vec![2, 2].as_slice())
                 .unwrap()
-                .build();
+                .into();
 
             let arr = g
                 .create_array::<i32>("array".parse().unwrap(), ameta)
@@ -291,7 +291,7 @@ mod tests {
             let ameta = ArrayMetadataBuilder::<i32>::new(&[4, 4])
                 .chunk_grid(vec![2, 2].as_slice())
                 .unwrap()
-                .build();
+                .into();
 
             let arr = g
                 .create_array::<i32>("array".parse().unwrap(), ameta)

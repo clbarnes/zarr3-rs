@@ -50,7 +50,7 @@ impl Extension {
     }
 }
 
-/// Use the [ArrayMetadataBuilder] to construct this in a convenient way.
+/// Should be constructed using the [ArrayMetadataBuilder], which implements [Into]<[ArrayMetadata]>.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArrayMetadata {
     zarr_format: usize,
@@ -101,64 +101,11 @@ impl WriteableMetadata for ArrayMetadata {
 }
 
 impl ArrayMetadata {
-    fn new_unchecked(
-        zarr_format: usize,
-        shape: GridCoord,
-        data_type: DataType,
-        chunk_grid: ChunkGridType,
-        chunk_key_encoding: ChunkKeyEncoding,
-        fill_value: serde_json::Value,
-        storage_transformers: Vec<StorageTransformer>,
-        codecs: CodecChain,
-        attributes: JsonObject,
-        dimension_names: Option<CoordVec<Option<String>>>,
-        extensions: HashMap<String, Extension>,
-    ) -> Self {
-        Self {
-            zarr_format,
-            shape,
-            data_type,
-            chunk_grid,
-            chunk_key_encoding,
-            fill_value,
-            storage_transformers,
-            codecs,
-            attributes,
-            dimension_names,
-            extensions,
-        }
-    }
-
-    fn new(
-        zarr_format: usize,
-        shape: GridCoord,
-        data_type: DataType,
-        chunk_grid: ChunkGridType,
-        chunk_key_encoding: ChunkKeyEncoding,
-        fill_value: serde_json::Value,
-        storage_transformers: Vec<StorageTransformer>,
-        codecs: CodecChain,
-        attributes: JsonObject,
-        dimension_names: Option<CoordVec<Option<String>>>,
-        extensions: HashMap<String, Extension>,
-    ) -> Result<Self, &'static str> {
-        let out = Self::new_unchecked(
-            zarr_format,
-            shape,
-            data_type,
-            chunk_grid,
-            chunk_key_encoding,
-            fill_value,
-            storage_transformers,
-            codecs,
-            attributes,
-            dimension_names,
-            extensions,
-        );
-        out.try_understand_extensions()?;
-        out.validate_dimensions()?;
-        out.validate_codecs()?;
-        Ok(out)
+    pub fn validate(&self) -> Result<(), &'static str> {
+        self.try_understand_extensions()?;
+        self.validate_dimensions()?;
+        self.validate_codecs()?;
+        Ok(())
     }
 
     /// Ensures that all unknown extensions do not require understanding.
@@ -302,9 +249,9 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
 
     /// Set the array->bytes codec.
     ///
-    /// By default, uses a little-[crate::codecs::ab::endian::EndianCodec].
+    /// By default, uses a little-endian [crate::codecs::ab::bytes_codec::BytesCodec].
     ///
-    /// Replaces an existing AB codec.
+    /// Replaces the existing AB codec.
     /// Fails if the dimensions are not compatible with the array's shape.
     pub fn ab_codec<C: Into<ABCodecType>>(mut self, codec: C) -> Result<Self, &'static str> {
         let c = codec.into();
@@ -364,9 +311,10 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
     pub fn extensions_mut(&mut self) -> &mut HashMap<String, Extension> {
         &mut self.extensions
     }
+}
 
-    /// Build the [ArrayMetadata].
-    pub fn build(self) -> ArrayMetadata {
+impl<T: ReflectedType> Into<ArrayMetadata> for ArrayMetadataBuilder<T> {
+    fn into(self) -> ArrayMetadata {
         // todo: should this fail if there are must_understand extensions?
         let chunk_grid = self
             .chunk_grid
@@ -374,19 +322,19 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
         let chunk_key_encoding = self.chunk_key_encoding.unwrap_or_default();
         let fill_value = self.fill_value.unwrap_or_default();
 
-        ArrayMetadata::new_unchecked(
-            ZARR_FORMAT,
-            self.shape,
-            self.data_type,
+        ArrayMetadata {
+            zarr_format: ZARR_FORMAT,
+            shape: self.shape,
+            data_type: self.data_type,
             chunk_grid,
             chunk_key_encoding,
-            serde_json::to_value(fill_value).unwrap(),
-            self.storage_transformers,
-            self.codecs,
-            self.attributes,
-            self.dimension_names,
-            self.extensions,
-        )
+            fill_value: serde_json::to_value(fill_value).unwrap(),
+            storage_transformers: self.storage_transformers,
+            codecs: self.codecs,
+            attributes: self.attributes,
+            dimension_names: self.dimension_names,
+            extensions: self.extensions,
+        }
     }
 }
 
@@ -459,15 +407,15 @@ impl<'s, S: Store, T: ReflectedType> Array<'s, S, T> {
         })
     }
 
-    fn key(&self) -> &NodeKey {
+    pub fn key(&self) -> &NodeKey {
         &self.key
     }
 
-    fn meta_key(&self) -> &NodeKey {
+    pub fn meta_key(&self) -> &NodeKey {
         &self.meta_key
     }
 
-    fn store(&self) -> &'s S {
+    pub fn store(&self) -> &'s S {
         self.store
     }
 
@@ -667,12 +615,12 @@ mod tests {
         codecs::{aa::TransposeCodec, ab::bytes_codec::BytesCodec, bb::gzip_codec::GzipCodec},
     };
 
-    use super::ArrayMetadataBuilder;
+    use super::{ArrayMetadata, ArrayMetadataBuilder};
     use smallvec::smallvec;
 
     #[test]
     fn build_arraymeta() {
-        let _meta = ArrayMetadataBuilder::new(&[100, 200, 300])
+        let _meta: ArrayMetadata = ArrayMetadataBuilder::new(&[100, 200, 300])
             .chunk_grid(vec![10, 10, 10].as_slice())
             .unwrap()
             .chunk_key_encoding(V2ChunkKeyEncoding::default())
@@ -688,6 +636,6 @@ mod tests {
                 Some("z".to_string())
             ])
             .unwrap()
-            .build();
+            .into();
     }
 }
