@@ -100,12 +100,12 @@ impl RangeRequest {
         &sl[self.to_range(sl.len())]
     }
 
-    fn to_range(&self, len: usize) -> Range<usize> {
+    fn to_range(self, len: usize) -> Range<usize> {
         let end = self.end(Some(len)).unwrap();
         match self {
-            Self::Range { offset, size: _ } => *offset..end,
+            Self::Range { offset, size: _ } => offset..end,
             Self::Suffix(s) => {
-                if &len < s {
+                if len < s {
                     0..end
                 } else {
                     (len - s)..end

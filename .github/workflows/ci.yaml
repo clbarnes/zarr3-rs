@@ -13,7 +13,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo check
-      # - run: cargo clippy --all-features
+      - run: cargo clippy --all-features -- --allow dead_code
       - run: cargo fmt -- --check
 
   test:

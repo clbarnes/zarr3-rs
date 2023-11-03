@@ -313,27 +313,27 @@ impl<T: ReflectedType> ArrayMetadataBuilder<T> {
     }
 }
 
-impl<T: ReflectedType> Into<ArrayMetadata> for ArrayMetadataBuilder<T> {
-    fn into(self) -> ArrayMetadata {
+impl<T: ReflectedType> From<ArrayMetadataBuilder<T>> for ArrayMetadata {
+    fn from(value: ArrayMetadataBuilder<T>) -> Self {
         // todo: should this fail if there are must_understand extensions?
-        let chunk_grid = self
+        let chunk_grid = value
             .chunk_grid
-            .unwrap_or_else(|| ChunkGridType::from(self.shape.as_slice()));
-        let chunk_key_encoding = self.chunk_key_encoding.unwrap_or_default();
-        let fill_value = self.fill_value.unwrap_or_default();
+            .unwrap_or_else(|| ChunkGridType::from(value.shape.as_slice()));
+        let chunk_key_encoding = value.chunk_key_encoding.unwrap_or_default();
+        let fill_value = value.fill_value.unwrap_or_default();
 
         ArrayMetadata {
             zarr_format: ZARR_FORMAT,
-            shape: self.shape,
-            data_type: self.data_type,
+            shape: value.shape,
+            data_type: value.data_type,
             chunk_grid,
             chunk_key_encoding,
             fill_value: serde_json::to_value(fill_value).unwrap(),
-            storage_transformers: self.storage_transformers,
-            codecs: self.codecs,
-            attributes: self.attributes,
-            dimension_names: self.dimension_names,
-            extensions: self.extensions,
+            storage_transformers: value.storage_transformers,
+            codecs: value.codecs,
+            attributes: value.attributes,
+            dimension_names: value.dimension_names,
+            extensions: value.extensions,
         }
     }
 }
