@@ -52,7 +52,7 @@ impl AACodec for TransposeCodec {
         encoded.permuted_axes(reverse_permutation(self.order.as_slice()).as_slice())
     }
 
-    fn compute_encoded_representation<T: ReflectedType>(
+    fn compute_encoded_representation_type<T: ReflectedType>(
         &self,
         decoded_repr: ArrayRepr<T>,
     ) -> ArrayRepr<T> {
@@ -61,6 +61,19 @@ impl AACodec for TransposeCodec {
             .iter()
             .map(|idx| decoded_repr.shape[*idx])
             .collect();
+        ArrayRepr {
+            shape,
+            fill_value: decoded_repr.fill_value,
+        }
+    }
+
+    fn compute_encoded_size<T: ReflectedType>(&self, decoded_repr: ArrayRepr<T>) -> ArrayRepr<T> {
+        let shape = self
+            .order
+            .iter()
+            .map(|idx| decoded_repr.shape[*idx])
+            .collect();
+
         ArrayRepr {
             shape,
             fill_value: decoded_repr.fill_value,

@@ -17,7 +17,7 @@ use bb::{BBCodec, BBCodecType};
 pub(super) mod fwrite;
 
 use crate::{
-    data_type::{DataType, ReflectedType},
+    data_type::{DataType, NBytes, ReflectedType},
     ArcArrayD, GridCoord, MaybeNdim,
 };
 
@@ -152,7 +152,7 @@ impl ABCodec for CodecChain {
         let ab_repr = self
             .aa_codecs
             .as_slice()
-            .compute_encoded_representation(decoded_repr);
+            .compute_encoded_representation_type(decoded_repr);
         let bb_r = self.bb_codecs.as_slice().decoder(r);
         let arr = self.ab_codec().decode::<T, _>(bb_r, ab_repr);
         self.aa_codecs.as_slice().decode(arr)
@@ -160,6 +160,12 @@ impl ABCodec for CodecChain {
 
     fn endian(&self) -> Option<ab::bytes_codec::Endian> {
         self.ab_codec.endian()
+    }
+
+    fn compute_encoded_size<T: ReflectedType>(&self, decoded_repr: ArrayRepr<T>) -> Option<usize> {
+        let sz = self.aa_codecs.as_slice().compute_encoded_size(decoded_repr);
+        let nb = self.ab_codec.compute_encoded_size(sz);
+        self.bb_codecs.as_slice().compute_encoded_size(nb)
     }
 }
 
@@ -242,6 +248,10 @@ impl<T: ReflectedType> ArrayRepr<T> {
     pub fn empty_array(&self) -> ArcArrayD<T> {
         let sh = self.shape.iter().map(|s| *s as usize).collect::<Vec<_>>();
         ArcArrayD::from_elem(sh.as_slice(), self.fill_value)
+    }
+
+    pub fn nbytes(&self) -> usize {
+        self.data_type().nbytes() * self.shape.iter().product::<u64>() as usize
     }
 }
 

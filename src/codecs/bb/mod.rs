@@ -15,9 +15,15 @@ use super::fwrite::{FinalWrite, FinalWriter};
 
 /// Common interface for compressing writers and decompressing readers.
 pub trait BBCodec {
+    /// Create a [Read]er which decodes data from the given [Read]er
     fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a>;
 
+    /// Create a [FinalWrite]r which encodes data and writes it to the given [Write]r.
     fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn FinalWrite + 'a>;
+
+    /// Not possible for variable-length encodings like compression codecs.
+    // Input is optional in case of e.g. a "padding" codec which knows the encoded size regardless of the decoded size.
+    fn compute_encoded_size(&self, decoded_size: Option<usize>) -> Option<usize>;
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -59,6 +65,17 @@ impl BBCodec for BBCodecType {
             Self::Crc32c(c) => c.unwrap_or_default().decoder(r),
         }
     }
+
+    fn compute_encoded_size(&self, input_size: Option<usize>) -> Option<usize> {
+        match self {
+            #[cfg(feature = "gzip")]
+            Self::Gzip(c) => c.compute_encoded_size(input_size),
+
+            #[cfg(feature = "blosc")]
+            Self::Blosc(c) => c.compute_encoded_size(input_size),
+            Self::Crc32c(c) => c.unwrap_or_default().compute_encoded_size(input_size),
+        }
+    }
 }
 
 impl BBCodec for &[BBCodecType] {
@@ -97,6 +114,11 @@ impl BBCodec for &[BBCodecType] {
         }
 
         out
+    }
+
+    fn compute_encoded_size(&self, input_size: Option<usize>) -> Option<usize> {
+        self.iter()
+            .fold(input_size, |acc, elem| elem.compute_encoded_size(acc))
     }
 }
 

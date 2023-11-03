@@ -1,4 +1,4 @@
-use crate::{codecs::ArrayRepr, data_type::NBytes, ArcArrayD, CoordVec, MaybeNdim};
+use crate::{codecs::ArrayRepr, ArcArrayD, CoordVec, MaybeNdim};
 use serde::{Deserialize, Serialize};
 
 use std::io::{Read, Write};
@@ -85,6 +85,10 @@ impl ABCodec for BytesCodec {
 
     fn endian(&self) -> Option<Endian> {
         self.endian
+    }
+
+    fn compute_encoded_size<T: ReflectedType>(&self, decoded_repr: ArrayRepr<T>) -> Option<usize> {
+        Some(decoded_repr.nbytes())
     }
 }
 

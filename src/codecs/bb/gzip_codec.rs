@@ -125,6 +125,10 @@ impl BBCodec for GzipCodec {
     fn decoder<'a, R: Read + 'a>(&self, r: R) -> Box<dyn Read + 'a> {
         Box::new(GzDecoder::new(r))
     }
+
+    fn compute_encoded_size(&self, _input_size: Option<usize>) -> Option<usize> {
+        None
+    }
 }
 
 #[cfg(test)]

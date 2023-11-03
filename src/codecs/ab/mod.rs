@@ -25,6 +25,8 @@ pub trait ABCodec {
     /// Read an array from the given [Read]er, via the configured codecs.
     fn decode<T: ReflectedType, R: Read>(&self, r: R, decoded_repr: ArrayRepr<T>) -> ArcArrayD<T>;
 
+    fn compute_encoded_size<T: ReflectedType>(&self, decoded_repr: ArrayRepr<T>) -> Option<usize>;
+
     /// The configured byte endianness for this codec.
     fn endian(&self) -> Option<Endian>;
 
@@ -49,6 +51,10 @@ impl<C: ABCodec + ?Sized> ABCodec for Box<C> {
 
     fn endian(&self) -> Option<Endian> {
         (**self).endian()
+    }
+
+    fn compute_encoded_size<T: ReflectedType>(&self, decoded_repr: ArrayRepr<T>) -> Option<usize> {
+        (**self).compute_encoded_size(decoded_repr)
     }
 }
 
@@ -81,6 +87,13 @@ impl ABCodec for ABCodecType {
         match self {
             Self::Bytes(c) => c.endian(),
             // Self::ShardingIndexed(c) => c.endian(),
+        }
+    }
+
+    fn compute_encoded_size<T: ReflectedType>(&self, decoded_repr: ArrayRepr<T>) -> Option<usize> {
+        match self {
+            Self::Bytes(c) => c.compute_encoded_size(decoded_repr),
+            // Self::ShardingIndexed(c) => c.compute_encoded_size(decoded_repr),
         }
     }
 }

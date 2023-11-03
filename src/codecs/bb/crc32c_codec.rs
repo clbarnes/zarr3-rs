@@ -109,6 +109,10 @@ impl BBCodec for Crc32cCodec {
     fn encoder<'a, W: Write + 'a>(&self, w: W) -> Box<dyn FinalWrite + 'a> {
         Box::new(Crc32cWriter::new(w))
     }
+
+    fn compute_encoded_size(&self, input_size: Option<usize>) -> Option<usize> {
+        input_size.map(|s| s + std::mem::size_of::<u32>())
+    }
 }
 
 #[cfg(test)]
