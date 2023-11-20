@@ -8,7 +8,7 @@ pub use blosc::{Clevel, Compressor, ShuffleMode};
 
 use crate::codecs::fwrite::{FinalWrite, FinalWriter};
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct BloscCodec {
     #[serde(deserialize_with = "cname_from_str", serialize_with = "cname_to_str")]
     pub cname: Compressor,
@@ -20,81 +20,6 @@ pub struct BloscCodec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typesize: Option<usize>,
 }
-
-// todo: replace when https://github.com/asomers/blosc-rs/pull/25 released
-fn clevel_eq(c1: Clevel, c2: Clevel) -> bool {
-    match c1 {
-        Clevel::None => match c2 {
-            Clevel::None => true,
-            _ => false,
-        },
-        Clevel::L1 => match c2 {
-            Clevel::L1 => true,
-            _ => false,
-        },
-        Clevel::L2 => match c2 {
-            Clevel::L2 => true,
-            _ => false,
-        },
-        Clevel::L3 => match c2 {
-            Clevel::L3 => true,
-            _ => false,
-        },
-        Clevel::L4 => match c2 {
-            Clevel::L4 => true,
-            _ => false,
-        },
-        Clevel::L5 => match c2 {
-            Clevel::L5 => true,
-            _ => false,
-        },
-        Clevel::L6 => match c2 {
-            Clevel::L6 => true,
-            _ => false,
-        },
-        Clevel::L7 => match c2 {
-            Clevel::L7 => true,
-            _ => false,
-        },
-        Clevel::L8 => match c2 {
-            Clevel::L8 => true,
-            _ => false,
-        },
-        Clevel::L9 => match c2 {
-            Clevel::L9 => true,
-            _ => false,
-        },
-    }
-}
-
-// todo: replace when https://github.com/asomers/blosc-rs/pull/25 released
-fn shuffle_eq(s1: ShuffleMode, s2: ShuffleMode) -> bool {
-    match s1 {
-        ShuffleMode::None => match s2 {
-            ShuffleMode::None => true,
-            _ => false,
-        },
-        ShuffleMode::Byte => match s2 {
-            ShuffleMode::Byte => true,
-            _ => false,
-        },
-        ShuffleMode::Bit => match s2 {
-            ShuffleMode::Bit => true,
-            _ => false,
-        },
-    }
-}
-
-impl PartialEq for BloscCodec {
-    fn eq(&self, other: &Self) -> bool {
-        self.cname == other.cname
-            && clevel_eq(self.clevel, other.clevel)
-            && shuffle_eq(self.shuffle, other.shuffle)
-            && self.blocksize == other.blocksize
-    }
-}
-
-impl Eq for BloscCodec {}
 
 fn cname_from_str<'de, D>(deserializer: D) -> Result<Compressor, D::Error>
 where
@@ -201,7 +126,7 @@ impl BloscBuildError {
     }
 
     fn check_typesize(shuffle: &ShuffleMode, typesize: &Option<usize>) -> Result<(), Self> {
-        if typesize.is_none() && !shuffle_eq(*shuffle, ShuffleMode::None) {
+        if typesize.is_none() && *shuffle != ShuffleMode::None {
             Err(Self::TypesizeNeeded(*shuffle))
         } else {
             Ok(())
@@ -366,7 +291,7 @@ impl BBCodec for BloscCodec {
         Box::new(BloscReader::new(r))
     }
 
-    fn compute_encoded_size(&self, input_size: Option<usize>) -> Option<usize> {
+    fn compute_encoded_size(&self, _input_size: Option<usize>) -> Option<usize> {
         None
     }
 }
