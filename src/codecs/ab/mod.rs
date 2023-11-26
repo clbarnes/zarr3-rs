@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod bytes_codec;
 use bytes_codec::BytesCodec;
-// pub mod sharding_indexed;
-// use sharding_indexed::ShardingIndexedCodec;
+pub mod sharding_indexed;
+use sharding_indexed::ShardingIndexedCodec;
 
 use self::bytes_codec::Endian;
 
